@@ -15,7 +15,7 @@ process.on("unhandledRejection", (r)   => { try { addLog("error","Unhandled reje
 state.developerID = DEVELOPER_ID;
 
 // ── Dashboard ───────────────────────────────────────────────────────────────
-startDashboard(5000);
+startDashboard(process.env.PORT || 5000);
 
 // ── Per-bot shared state (synced across workers) ────────────────────────────
 const sharedState = {
