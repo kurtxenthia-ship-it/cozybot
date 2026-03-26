@@ -1,0 +1,28 @@
+{
+  "name": "COZY BOT PANEL",
+  "version": "1.0.0",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "start:dev": "nodemon src/index.js"
+  },
+  "dependencies": {
+    "ws3-fca": "./ws3-fca",
+    "axios": "^1.6.5",
+    "bluebird": "^3.7.2",
+    "chalk": "^3.0.0",
+    "cheerio": "^0.22.0",
+    "dotenv": "^16.4.5",
+    "form-data": "^4.0.0",
+    "gradient-string": "^1.1.0",
+    "https-proxy-agent": "^4.0.0",
+    "mqtt": "^3.0.0",
+    "node-cron": "^3.0.3",
+    "npmlog": "^7.0.1",
+    "request": "^2.88.2",
+    "websocket-stream": "^5.5.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
