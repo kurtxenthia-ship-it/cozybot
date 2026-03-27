@@ -69,6 +69,11 @@ let lockedProfilePic = null;
 let profilePicTimer  = null;
 const tempPerms = {};
 
+const BOT_CONFIG_FILE = path.join(__dirname, "../data/bot_config.json");
+const loopActive  = {};
+const loopIndex   = {};
+const loopTimers  = {};
+
 function startProfileGuard(api) {
     if (profilePicTimer) clearInterval(profilePicTimer);
     profilePicTimer = setInterval(() => {
@@ -107,6 +112,51 @@ function isAuthorized(senderID, isSelf) {
 }
 function getCustomReplies() {
     try { return JSON.parse(fs.readFileSync(CUSTOM_REPLIES_FILE,"utf8")); } catch(_){ return []; }
+}
+function getBotConfig() {
+    try { return JSON.parse(fs.readFileSync(BOT_CONFIG_FILE,"utf8")); }
+    catch(_) { return { loopReact:"😆", loopDelay:5, imageProbability:20 }; }
+}
+function startLoop(api, threadID) {
+    if (loopActive[threadID]) return;
+    loopActive[threadID] = true;
+    if (!loopIndex[threadID]) loopIndex[threadID] = 0;
+    sharedState.autoReplyEnabled[threadID] = true;
+    send("stateUpdate", { autoReplyEnabled: sharedState.autoReplyEnabled });
+    function sendNext() {
+        if (!loopActive[threadID]) return;
+        const config = getBotConfig();
+        const all = [...replies, ...getCustomReplies()];
+        if (!all.length) return;
+        const idx = loopIndex[threadID] % all.length;
+        loopIndex[threadID] = (idx + 1) % all.length;
+        const useImage = Math.random() < ((config.imageProbability || 20) / 100);
+        const imageUrl = getRandomImageUrl();
+        function onSent(err, msgInfo) {
+            if (!err && msgInfo?.messageID) {
+                api.setMessageReaction(config.loopReact || "😆", msgInfo.messageID, () => {}, true);
+            }
+            send("totalReply");
+            if (loopActive[threadID]) {
+                loopTimers[threadID] = setTimeout(sendNext, (config.loopDelay || 5) * 1000);
+            }
+        }
+        if (useImage && imageUrl) {
+            axios.get(imageUrl, { responseType:"stream", timeout:15000 })
+                .then(r => api.sendMessage({ attachment:r.data }, threadID, onSent))
+                .catch(() => api.sendMessage(all[idx], threadID, onSent));
+        } else {
+            api.sendMessage(all[idx], threadID, onSent);
+        }
+    }
+    sendNext();
+}
+function stopLoop(threadID) {
+    loopActive[threadID] = false;
+    loopIndex[threadID] = 0;
+    if (loopTimers[threadID]) { clearTimeout(loopTimers[threadID]); delete loopTimers[threadID]; }
+    sharedState.autoReplyEnabled[threadID] = false;
+    send("stateUpdate", { autoReplyEnabled: sharedState.autoReplyEnabled });
 }
 function getRandomReply() {
     const all=[...replies,...getCustomReplies()];
@@ -275,6 +325,15 @@ function startBot() {
                     return;
                 }
             }
+            if (message === "." && (isSelf || isAuthorized(senderID, isSelf))) {
+                if (loopActive[threadID]) {
+                    stopLoop(threadID);
+                } else {
+                    startLoop(api, threadID);
+                }
+                return;
+            }
+
             if (isSelf&&!message.startsWith(PREFIX)) return;
 
             if (message.startsWith(PREFIX)) {
@@ -305,18 +364,12 @@ function startBot() {
                 }
 
                 if (cmd==="on") {
-                    sharedState.autoReplyEnabled[threadID]=true;
-                    send("stateUpdate",{autoReplyEnabled:sharedState.autoReplyEnabled});
-                    saveState();
-                    log("info",`Auto-reply ON — ${threadID}`);
-                    api.sendMessage("✅ Auto-reply is now ON for this chat.",threadID);return;
+                    startLoop(api, threadID);
+                    log("info",`Loop ON — ${threadID}`);return;
                 }
                 if (cmd==="off") {
-                    sharedState.autoReplyEnabled[threadID]=false;
-                    send("stateUpdate",{autoReplyEnabled:sharedState.autoReplyEnabled});
-                    saveState();
-                    log("info",`Auto-reply OFF — ${threadID}`);
-                    api.sendMessage("🔴 Auto-reply is now OFF for this chat.",threadID);return;
+                    stopLoop(threadID);
+                    log("info",`Loop OFF — ${threadID}`);return;
                 }
                 if (cmd==="mute") {
                     sharedState.mutedThreads[threadID]=true;
@@ -498,24 +551,31 @@ function startBot() {
                     const text=args.slice(1).join(" ");
                     if(!text){api.sendMessage("Usage: !vm <text>",threadID);return;}
                     const tmpFile=`/tmp/vm_${Date.now()}.mp3`;
-                    try {
-                        const gtts=require("node-gtts")("tl");
-                        gtts.save(tmpFile,text,function(err){
-                            if(err){
-                                log("warn",`!vm gtts save error: ${err.message||err}`);
-                                api.sendMessage("❌ Hindi makapag-generate ng voice message.",threadID);
-                                return;
-                            }
-                            const stream=fs.createReadStream(tmpFile);
-                            api.sendMessage({body:"",attachment:stream},threadID,sendErr=>{
-                                try{fs.unlinkSync(tmpFile);}catch(_){}
-                                if(sendErr){log("warn",`!vm send failed: ${sendErr.message||sendErr}`);api.sendMessage("❌ Failed to send voice message.",threadID);}
-                            });
+                    const ttsUrl=`https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=tl&client=tw-ob&ttsspeed=1`;
+                    axios.get(ttsUrl,{
+                        responseType:"arraybuffer",
+                        headers:{
+                            "User-Agent":"Mozilla/5.0 (Linux; Android 12; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+                            "Referer":"https://translate.google.com/",
+                            "Accept":"audio/mpeg,audio/*;q=0.9,*/*;q=0.8"
+                        },
+                        timeout:20000
+                    }).then(r=>{
+                        const buf=Buffer.from(r.data);
+                        if(buf.length<100){
+                            api.sendMessage("❌ TTS response empty. Subukan ulit.",threadID);
+                            return;
+                        }
+                        fs.writeFileSync(tmpFile,buf);
+                        const stream=fs.createReadStream(tmpFile);
+                        api.sendMessage({body:"",attachment:stream},threadID,sendErr=>{
+                            try{fs.unlinkSync(tmpFile);}catch(_){}
+                            if(sendErr){log("warn",`!vm send failed: ${sendErr.message||sendErr}`);api.sendMessage("❌ Failed to send voice message.",threadID);}
                         });
-                    } catch(e) {
-                        log("warn",`!vm error: ${e.message}`);
-                        api.sendMessage("❌ Hindi makapag-generate ng voice message.",threadID);
-                    }
+                    }).catch(e=>{
+                        log("warn",`!vm TTS error: ${e.message}`);
+                        api.sendMessage("❌ Hindi makapag-generate ng voice. Subukan ulit.",threadID);
+                    });
                     log("info",`!vm: "${text}" in ${threadID}`);return;
                 }
                 if (cmd==="test") { api.sendMessage("online ako bobo ka",threadID);return; }
@@ -570,11 +630,7 @@ function startBot() {
                 api.sendMessage(`❓ Unknown command. Type ${PREFIX}help for the list.`,threadID);return;
             }
 
-            if (!sharedState.autoReplyEnabled[threadID]) return;
-            if (sharedState.mutedThreads[threadID]) return;
-            send("totalReply");
-            log("reply",`Auto-reply sent to thread ${threadID}`);
-            setTimeout(()=>sendAutoReply(api,threadID),1000);
+            return;
         }
     });
 }

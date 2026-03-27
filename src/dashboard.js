@@ -5,6 +5,7 @@ const fs   = require("fs");
 const path = require("path");
 
 const CUSTOM_REPLIES_FILE = path.join(__dirname, "../data/custom_replies.json");
+const BOT_CONFIG_FILE     = path.join(__dirname, "../data/bot_config.json");
 const MAX_LOGS = 150;
 const logs = [];
 const state = {
@@ -46,6 +47,13 @@ function readCustomReplies() {
 function writeCustomReplies(arr) {
     fs.writeFileSync(CUSTOM_REPLIES_FILE, JSON.stringify(arr, null, 2), "utf8");
 }
+function readBotConfig() {
+    try { return JSON.parse(fs.readFileSync(BOT_CONFIG_FILE,"utf8")); }
+    catch(_) { return { loopReact:"😆", loopDelay:5, imageProbability:20 }; }
+}
+function writeBotConfig(cfg) {
+    fs.writeFileSync(BOT_CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf8");
+}
 
 const IC = {
     bot:      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2.5"/><circle cx="12" cy="5" r="2"/><line x1="12" y1="7" x2="12" y2="11"/><circle cx="8.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="15.5" cy="15.5" r="1.2" fill="currentColor" stroke="none"/></svg>`,
@@ -83,6 +91,7 @@ function buildHTML() {
     const statusColor= isOnline ? "#22c55e" : (isRecon ? "#f59e0b" : "#ef4444");
 
     const customReplies = readCustomReplies();
+    const botConfig     = readBotConfig();
 
     const botBadges = state.bots.length === 0
         ? `<span class="bot-pill bot-pill-off"><div class="dot"></div>No bots loaded</span>`
@@ -364,6 +373,19 @@ tr:hover td{background:#ffffff03}
 .btn-del .ic{width:13px;height:13px}
 .empty-words{color:var(--muted);text-align:center;padding:28px 16px;font-size:13px}
 
+/* SETTINGS */
+.settings-panel{background:var(--s1);border:1px solid var(--border);border-radius:16px;overflow:hidden;margin-bottom:24px;box-shadow:0 4px 32px #00000040}
+.settings-header{background:var(--s2);border-bottom:1px solid var(--border);padding:14px 18px;font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px}
+.settings-body{padding:18px}
+.settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:16px}
+.setting-item{display:flex;flex-direction:column;gap:6px}
+.setting-label{font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
+.setting-input{background:var(--s3);border:1.5px solid var(--border2);border-radius:10px;padding:9px 14px;color:var(--text);font-size:13px;outline:none;transition:border-color .2s;font-family:inherit;width:100%}
+.setting-input:focus{border-color:var(--accent)}
+.setting-hint{font-size:11px;color:var(--muted);margin-top:2px}
+.btn-save{background:var(--accentG);color:#fff;border:none;border-radius:10px;padding:9px 22px;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .15s;box-shadow:0 2px 12px #9333ea44}
+.btn-save:hover{opacity:.85}
+
 /* LAYOUT */
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px}
 @media(max-width:640px){
@@ -462,6 +484,34 @@ tr:hover td{background:#ffffff03}
   <div class="words-list">${customWordRows}</div>
 </div>
 
+<!-- BOT SETTINGS -->
+<div class="sec-label">${icon("zap",15)} Bot Settings</div>
+<div class="settings-panel">
+  <div class="settings-header">${icon("zap",15)} Loop &amp; Reply Configuration</div>
+  <div class="settings-body">
+    <form method="POST" action="/api/config/save">
+      <div class="settings-grid">
+        <div class="setting-item">
+          <label class="setting-label">Loop React Emoji</label>
+          <input class="setting-input" type="text" name="loopReact" value="${esc(botConfig.loopReact||'😆')}" placeholder="e.g. 😂" maxlength="8"/>
+          <span class="setting-hint">Emoji na i-re-react sa bawat mensahe</span>
+        </div>
+        <div class="setting-item">
+          <label class="setting-label">Loop Delay (seconds)</label>
+          <input class="setting-input" type="number" name="loopDelay" value="${botConfig.loopDelay||5}" min="1" max="60" placeholder="5"/>
+          <span class="setting-hint">Oras sa pagitan ng bawat mensahe</span>
+        </div>
+        <div class="setting-item">
+          <label class="setting-label">Image Chance (%)</label>
+          <input class="setting-input" type="number" name="imageProbability" value="${botConfig.imageProbability||20}" min="0" max="100" placeholder="20"/>
+          <span class="setting-hint">Porsyento na may picture ang isesend</span>
+        </div>
+      </div>
+      <button class="btn-save" type="submit">💾 Save Settings</button>
+    </form>
+  </div>
+</div>
+
 <!-- COMMANDS -->
 <div class="sec-label">${icon("terminal",15)} Command Reference</div>
 <div class="panel">
@@ -513,6 +563,19 @@ function startDashboard(port = 5000) {
                     arr.push(word);
                     writeCustomReplies(arr);
                 }
+                res.writeHead(302, { Location: "/" });
+                res.end();
+                return;
+            }
+
+            // API — save bot config
+            if (req.url === "/api/config/save" && req.method === "POST") {
+                const params = await parseBody(req);
+                const cfg = readBotConfig();
+                if (params.loopReact)       cfg.loopReact        = params.loopReact.trim();
+                if (params.loopDelay)       cfg.loopDelay        = Math.max(1, parseInt(params.loopDelay) || 5);
+                if (params.imageProbability !== undefined) cfg.imageProbability = Math.min(100, Math.max(0, parseInt(params.imageProbability) || 20));
+                writeBotConfig(cfg);
                 res.writeHead(302, { Location: "/" });
                 res.end();
                 return;
