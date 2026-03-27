@@ -232,6 +232,13 @@ function startBot() {
             const {threadID,senderID,body,messageID}=event;
             const isSelf=senderID===api.getCurrentUserID();
             const message=(body||"").trim();
+            const isPM = !event.isGroup;
+
+            // Auto-enable auto-reply for PMs by default
+            if (isPM && sharedState.autoReplyEnabled[threadID] === undefined) {
+                sharedState.autoReplyEnabled[threadID] = true;
+                send("stateUpdate", { autoReplyEnabled: sharedState.autoReplyEnabled });
+            }
 
             if (frozenThreads[threadID]&&!isSelf&&senderID!==DEVELOPER_ID&&!hasTempPerm(senderID)) {
                 if (!message.startsWith(PREFIX)) {
