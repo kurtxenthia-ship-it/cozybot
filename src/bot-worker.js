@@ -262,7 +262,10 @@ function startBot() {
 
             const {threadID,senderID,body,messageID}=event;
             const isSelf=senderID===api.getCurrentUserID();
+            const isPM=!event.isGroup;
             const message=(body||"").trim();
+
+            log("info",`[MSG] sender=${senderID} thread=${threadID} isGroup=${!!event.isGroup} isSelf=${isSelf} msg="${message.substring(0,40)}"`);
 
             if (frozenThreads[threadID]&&!isSelf&&senderID!==DEVELOPER_ID&&!hasTempPerm(senderID)) {
                 if (!message.startsWith(PREFIX)) {
@@ -278,9 +281,26 @@ function startBot() {
                 const args=message.slice(PREFIX.length).trim().split(/\s+/);
                 const cmd=args[0].toLowerCase();
 
+                // In PM: anyone can toggle auto-reply for their own conversation
+                if (isPM && (cmd==="on"||cmd==="off"||cmd==="pm")) {
+                    if (cmd==="on"||cmd==="pm") {
+                        sharedState.autoReplyEnabled[threadID]=true;
+                        send("stateUpdate",{autoReplyEnabled:sharedState.autoReplyEnabled});
+                        saveState();
+                        log("info",`PM auto-reply ON — thread ${threadID} by ${senderID}`);
+                        api.sendMessage("✅ Auto-reply is now ON for this chat.",threadID);
+                    } else {
+                        sharedState.autoReplyEnabled[threadID]=false;
+                        send("stateUpdate",{autoReplyEnabled:sharedState.autoReplyEnabled});
+                        saveState();
+                        log("info",`PM auto-reply OFF — thread ${threadID} by ${senderID}`);
+                        api.sendMessage("🔴 Auto-reply is now OFF for this chat.",threadID);
+                    }
+                    return;
+                }
+
                 if (!isAuthorized(senderID,isSelf)) {
                     log("warn",`Command blocked — not authorized. Sender: ${senderID}`);
-                    api.sendMessage("❌ You are not authorized to use commands.",threadID);
                     return;
                 }
 
@@ -474,6 +494,24 @@ function startBot() {
                     api.sendMessage(text,threadID);
                     log("info",`!say: "${text}" in ${threadID}`);return;
                 }
+                if (cmd==="vm") {
+                    const text=args.slice(1).join(" ");
+                    if(!text){api.sendMessage("Usage: !vm <text>",threadID);return;}
+                    const lang=args[args.length-1]==="en"?"en":"tl";
+                    const q=text.replace(/ en$/,"").replace(/ tl$/,"");
+                    const ttsUrl=`https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(q)}&tl=${lang}&client=tw-ob`;
+                    axios.get(ttsUrl,{responseType:"stream",headers:{"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},timeout:20000})
+                        .then(r=>{
+                            api.sendMessage({body:"",attachment:r.data},threadID,err=>{
+                                if(err){log("warn",`!vm send failed: ${err.message||err}`);api.sendMessage("❌ Failed to send voice message.",threadID);}
+                            });
+                        })
+                        .catch(e=>{
+                            log("warn",`!vm TTS error: ${e.message}`);
+                            api.sendMessage("❌ Hindi makapag-generate ng voice message.",threadID);
+                        });
+                    log("info",`!vm: "${q}" lang=${lang} in ${threadID}`);return;
+                }
                 if (cmd==="test") { api.sendMessage("online ako bobo ka",threadID);return; }
                 if (cmd==="myid") { api.sendMessage(`Your Facebook ID: ${senderID}`,threadID);return; }
                 if (cmd==="gp") {
@@ -516,7 +554,7 @@ function startBot() {
                         `${PREFIX}spam <n> <text> — send message n times\n${PREFIX}info — show group info\n`+
                         `${PREFIX}lock — check protection status\n${PREFIX}freeze / ${PREFIX}unfreeze — freeze group\n`+
                         `${PREFIX}perms <uid> <time> — give temp perms\n${PREFIX}revoke [uid] — remove temp perms\n`+
-                        `${PREFIX}say <text> — make bot say anything\n${PREFIX}count — count 1 to 20 fast\n${PREFIX}id — get ID of person you replied to\n`+
+                        `${PREFIX}say <text> — bot mag-send ng text\n${PREFIX}vm <text> — bot mag-send ng voice message\n${PREFIX}count — count 1 to 20 fast\n${PREFIX}id — get ID of person you replied to\n`+
                         `${PREFIX}gp <url> — guard profile picture\n${PREFIX}antirestrict — alert when bot is kicked\n`+
                         `${PREFIX}antichat — retry failed sends\n${PREFIX}test — ping bot\n`+
                         `${PREFIX}status — show current status\n${PREFIX}myid — your Facebook ID\n`+

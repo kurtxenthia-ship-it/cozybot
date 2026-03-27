@@ -132,7 +132,8 @@ function buildHTML() {
     const COMMANDS = [
         ["!on / !off",            "Toggle auto-reply — works sa groups at PMs"],
         ["!mute / !unmute",       "I-pause o i-resume ang auto-reply"],
-        ["!say &lt;text&gt;",     "Ipasabi ang kahit anong message sa bot"],
+        ["!say &lt;text&gt;",     "Bot mag-send ng text sa chat"],
+        ["!vm &lt;text&gt;",      "Bot mag-send ng voice message (TTS)"],
         ["!nn &lt;name&gt;",      "I-set ang nickname ng lahat ng members"],
         ["!cg &lt;name&gt;",      "I-palitan ang pangalan ng group"],
         ["!banner [url]",         "I-set ang group photo + protection"],
