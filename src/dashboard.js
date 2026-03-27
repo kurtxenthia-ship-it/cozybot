@@ -188,13 +188,13 @@ function buildHTML() {
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#080b10;--s0:#0c1018;--s1:#0f1319;--s2:#141920;--s3:#1a2030;
-  --border:#1e2530;--border2:#253040;--border3:#2e3d50;
-  --text:#c8d8e8;--muted:#3a4d60;--muted2:#5a7a95;--muted3:#7a9ab5;
-  --accent:#0ea5e9;--accent2:#38bdf8;--accentG:linear-gradient(135deg,#0369a1,#0ea5e9,#38bdf8);
-  --green:#10b981;--green2:#34d399;--red:#f43f5e;--yellow:#f59e0b;
-  --cyan:#06b6d4;--violet:#818cf8;--orange:#f97316;
-  --mono:'JetBrains Mono',monospace;--sans:'Inter',system-ui,sans-serif;
+  --bg:#0b0906;--s0:#110e08;--s1:#181208;--s2:#21180c;--s3:#2d2010;
+  --border:#3a2a16;--border2:#4d3820;--border3:#6e5030;
+  --text:#f2e8d6;--muted:#6b5038;--muted2:#9a7855;--muted3:#c9a87a;
+  --accent:#f5a623;--accent2:#ffd166;--accentG:linear-gradient(135deg,#c47d0a,#f5a623,#ffd166);
+  --green:#22c55e;--green2:#4ade80;--red:#f43f5e;--red2:#fda4af;
+  --blue:#60a5fa;--purple:#c084fc;--teal:#2dd4bf;
+  --mono:'JetBrains Mono',monospace;
 }
 html{scroll-behavior:smooth}
 body{
@@ -647,9 +647,16 @@ function startDashboard(port = 5000) {
             if (req.url === "/api/config/save" && req.method === "POST") {
                 const params = await parseBody(req);
                 const cfg = readBotConfig();
-                if (params.loopReact)       cfg.loopReact        = params.loopReact.trim();
-                if (params.loopDelay)       cfg.loopDelay        = Math.max(1, parseInt(params.loopDelay) || 5);
-                if (params.imageProbability !== undefined) cfg.imageProbability = Math.min(100, Math.max(0, parseInt(params.imageProbability) || 20));
+                if (params.loopReact !== undefined)       cfg.loopReact         = params.loopReact.trim() || "😆";
+                if (params.loopDelay !== undefined)       cfg.loopDelay         = Math.max(1, parseInt(params.loopDelay) || 5);
+                if (params.imageProbability !== undefined) cfg.imageProbability  = Math.min(100, Math.max(0, parseInt(params.imageProbability) || 20));
+                if (params.loopMode !== undefined)        cfg.loopMode          = ["sequential","shuffle"].includes(params.loopMode) ? params.loopMode : "sequential";
+                if (params.loopStartMsg !== undefined)    cfg.loopStartMsg      = params.loopStartMsg.trim();
+                if (params.loopStopMsg !== undefined)     cfg.loopStopMsg       = params.loopStopMsg.trim();
+                if (params.maxLoopCount !== undefined)    cfg.maxLoopCount      = Math.max(0, parseInt(params.maxLoopCount) || 0);
+                if (params.autoStopMinutes !== undefined) cfg.autoStopMinutes   = Math.max(0, parseInt(params.autoStopMinutes) || 0);
+                if (params.ttsLang !== undefined)         cfg.ttsLang           = params.ttsLang.trim() || "tl";
+                cfg.reactOnlyMode = params.reactOnlyMode === "1";
                 writeBotConfig(cfg);
                 res.writeHead(302, { Location: "/" });
                 res.end();

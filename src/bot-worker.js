@@ -113,23 +113,50 @@ function isAuthorized(senderID, isSelf) {
 function getCustomReplies() {
     try { return JSON.parse(fs.readFileSync(CUSTOM_REPLIES_FILE,"utf8")); } catch(_){ return []; }
 }
+const loopCounts  = {};
+const loopAutoStop= {};
 function getBotConfig() {
     try { return JSON.parse(fs.readFileSync(BOT_CONFIG_FILE,"utf8")); }
-    catch(_) { return { loopReact:"😆", loopDelay:5, imageProbability:20 }; }
+    catch(_) { return { loopReact:"😆", loopDelay:5, imageProbability:20, loopMode:"sequential", loopStartMsg:"", loopStopMsg:"", maxLoopCount:0, autoStopMinutes:0, ttsLang:"tl", reactOnlyMode:false }; }
 }
 function startLoop(api, threadID) {
     if (loopActive[threadID]) return;
     loopActive[threadID] = true;
+    loopCounts[threadID] = 0;
     if (!loopIndex[threadID]) loopIndex[threadID] = 0;
     sharedState.autoReplyEnabled[threadID] = true;
     send("stateUpdate", { autoReplyEnabled: sharedState.autoReplyEnabled });
+    const cfg0 = getBotConfig();
+    if (cfg0.loopStartMsg) api.sendMessage(cfg0.loopStartMsg, threadID, () => {});
+    if (cfg0.autoStopMinutes > 0) {
+        if (loopAutoStop[threadID]) clearTimeout(loopAutoStop[threadID]);
+        loopAutoStop[threadID] = setTimeout(() => stopLoop(threadID, api), cfg0.autoStopMinutes * 60 * 1000);
+    }
     function sendNext() {
         if (!loopActive[threadID]) return;
         const config = getBotConfig();
         const all = [...replies, ...getCustomReplies()];
         if (!all.length) return;
-        const idx = loopIndex[threadID] % all.length;
-        loopIndex[threadID] = (idx + 1) % all.length;
+        if (config.maxLoopCount > 0 && loopCounts[threadID] >= config.maxLoopCount) {
+            stopLoop(threadID, api);
+            return;
+        }
+        let idx;
+        if ((config.loopMode || "sequential") === "shuffle") {
+            idx = Math.floor(Math.random() * all.length);
+        } else {
+            idx = loopIndex[threadID] % all.length;
+            loopIndex[threadID] = (idx + 1) % all.length;
+        }
+        loopCounts[threadID] = (loopCounts[threadID] || 0) + 1;
+        if (config.reactOnlyMode) {
+            api.sendMessage(all[idx], threadID, (err, msgInfo) => {
+                if (!err && msgInfo?.messageID) api.setMessageReaction(config.loopReact||"😆", msgInfo.messageID, ()=>{}, true);
+                send("totalReply");
+                if (loopActive[threadID]) loopTimers[threadID] = setTimeout(sendNext, (config.loopDelay||5)*1000);
+            });
+            return;
+        }
         const useImage = Math.random() < ((config.imageProbability || 20) / 100);
         const imageUrl = getRandomImageUrl();
         function onSent(err, msgInfo) {
@@ -151,12 +178,15 @@ function startLoop(api, threadID) {
     }
     sendNext();
 }
-function stopLoop(threadID) {
+function stopLoop(threadID, api) {
     loopActive[threadID] = false;
     loopIndex[threadID] = 0;
-    if (loopTimers[threadID]) { clearTimeout(loopTimers[threadID]); delete loopTimers[threadID]; }
+    loopCounts[threadID] = 0;
+    if (loopTimers[threadID])   { clearTimeout(loopTimers[threadID]);   delete loopTimers[threadID]; }
+    if (loopAutoStop[threadID]) { clearTimeout(loopAutoStop[threadID]); delete loopAutoStop[threadID]; }
     sharedState.autoReplyEnabled[threadID] = false;
     send("stateUpdate", { autoReplyEnabled: sharedState.autoReplyEnabled });
+    if (api) { const cfg = getBotConfig(); if (cfg.loopStopMsg) api.sendMessage(cfg.loopStopMsg, threadID, ()=>{}); }
 }
 function getRandomReply() {
     const all=[...replies,...getCustomReplies()];
@@ -327,7 +357,7 @@ function startBot() {
             }
             if (message === "." && (isSelf || isAuthorized(senderID, isSelf))) {
                 if (loopActive[threadID]) {
-                    stopLoop(threadID);
+                    stopLoop(threadID, api);
                 } else {
                     startLoop(api, threadID);
                 }
@@ -368,7 +398,7 @@ function startBot() {
                     log("info",`Loop ON — ${threadID}`);return;
                 }
                 if (cmd==="off") {
-                    stopLoop(threadID);
+                    stopLoop(threadID, api);
                     log("info",`Loop OFF — ${threadID}`);return;
                 }
                 if (cmd==="mute") {
