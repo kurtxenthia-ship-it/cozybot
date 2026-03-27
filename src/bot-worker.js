@@ -264,16 +264,36 @@ function startBot() {
                     return;
                 }
             }
+            const isPM = !event.isGroup;
             if (isSelf&&!message.startsWith(PREFIX)) return;
 
             if (message.startsWith(PREFIX)) {
+                const args=message.slice(PREFIX.length).trim().split(/\s+/);
+                const cmd=args[0].toLowerCase();
+
+                // Allow anyone to use !on, !off, !pm in their own PM conversation
+                if (isPM && (cmd==="on"||cmd==="off"||cmd==="pm")) {
+                    if (cmd==="on"||cmd==="pm") {
+                        sharedState.autoReplyEnabled[threadID]=true;
+                        send("stateUpdate",{autoReplyEnabled:sharedState.autoReplyEnabled});
+                        saveState();
+                        log("info",`Auto-reply ON via PM — ${threadID}`);
+                        api.sendMessage("✅ Auto-reply is now ON for this conversation.",threadID);return;
+                    }
+                    if (cmd==="off") {
+                        sharedState.autoReplyEnabled[threadID]=false;
+                        send("stateUpdate",{autoReplyEnabled:sharedState.autoReplyEnabled});
+                        saveState();
+                        log("info",`Auto-reply OFF via PM — ${threadID}`);
+                        api.sendMessage("🔴 Auto-reply is now OFF for this conversation.",threadID);return;
+                    }
+                }
+
                 if (!isAuthorized(senderID,isSelf)) {
                     log("warn",`Command blocked — not authorized. Sender: ${senderID}`);
                     api.sendMessage("❌ You are not authorized to use commands.",threadID);
                     return;
                 }
-                const args=message.slice(PREFIX.length).trim().split(/\s+/);
-                const cmd=args[0].toLowerCase();
 
                 if (cmd==="on") {
                     sharedState.autoReplyEnabled[threadID]=true;
