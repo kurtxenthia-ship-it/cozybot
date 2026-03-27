@@ -13,6 +13,7 @@ const PREFIX = "!";
 const MIN_RECONNECT_DELAY = 5000;
 const MAX_RECONNECT_DELAY = 60000;
 const DEFAULT_BANNER_URL  = "https://file.garden/aahuG_hIDGRlXD24/image.jpg";
+const STATE_FILE = path.join(__dirname, "../data/bot_state.json");
 
 const COLOR_MAP = {
     blue:"196241301102133",pink:"169463077092846",hotpink:"169463077092846",
@@ -32,13 +33,35 @@ function log(level, message) {
     send("log", { level, message: `[${BOT_LABEL}] ${message}` });
 }
 
-const sharedState = {
-    autoReplyEnabled: {},
-    mutedThreads: {},
-    nicknameMap: {},
-    antiRestrict: false,
-    antiChat: {},
-};
+function loadState() {
+    try {
+        const raw = fs.readFileSync(STATE_FILE, "utf8");
+        const saved = JSON.parse(raw);
+        return {
+            autoReplyEnabled: saved.autoReplyEnabled || {},
+            mutedThreads: saved.mutedThreads || {},
+            nicknameMap: saved.nicknameMap || {},
+            antiRestrict: saved.antiRestrict || false,
+            antiChat: saved.antiChat || {},
+        };
+    } catch (_) {
+        return { autoReplyEnabled: {}, mutedThreads: {}, nicknameMap: {}, antiRestrict: false, antiChat: {} };
+    }
+}
+
+function saveState() {
+    try {
+        fs.writeFileSync(STATE_FILE, JSON.stringify({
+            autoReplyEnabled: sharedState.autoReplyEnabled,
+            mutedThreads: sharedState.mutedThreads,
+            nicknameMap: sharedState.nicknameMap,
+            antiRestrict: sharedState.antiRestrict,
+            antiChat: sharedState.antiChat,
+        }, null, 2));
+    } catch (_) {}
+}
+
+const sharedState = loadState();
 
 let reconnectDelay = MIN_RECONNECT_DELAY;
 let lockedProfilePic = null;
@@ -255,24 +278,28 @@ function startBot() {
                 if (cmd==="on") {
                     sharedState.autoReplyEnabled[threadID]=true;
                     send("stateUpdate",{autoReplyEnabled:sharedState.autoReplyEnabled});
+                    saveState();
                     log("info",`Auto-reply ON — ${threadID}`);
                     api.sendMessage("✅ Auto-reply is now ON for this chat.",threadID);return;
                 }
                 if (cmd==="off") {
                     sharedState.autoReplyEnabled[threadID]=false;
                     send("stateUpdate",{autoReplyEnabled:sharedState.autoReplyEnabled});
+                    saveState();
                     log("info",`Auto-reply OFF — ${threadID}`);
                     api.sendMessage("🔴 Auto-reply is now OFF for this chat.",threadID);return;
                 }
                 if (cmd==="mute") {
                     sharedState.mutedThreads[threadID]=true;
                     send("stateUpdate",{mutedThreads:sharedState.mutedThreads});
+                    saveState();
                     log("info",`Auto-reply muted — ${threadID}`);
                     api.sendMessage("🔇 Auto-reply muted. Use !unmute to resume.",threadID);return;
                 }
                 if (cmd==="unmute") {
                     delete sharedState.mutedThreads[threadID];
                     send("stateUpdate",{mutedThreads:sharedState.mutedThreads});
+                    saveState();
                     log("info",`Auto-reply unmuted — ${threadID}`);
                     api.sendMessage("🔔 Auto-reply unmuted!",threadID);return;
                 }
@@ -322,6 +349,7 @@ function startBot() {
                 if (cmd==="pm") {
                     sharedState.autoReplyEnabled[threadID]=true;
                     send("stateUpdate",{autoReplyEnabled:sharedState.autoReplyEnabled});
+                    saveState();
                     log("info",`Auto-reply ON via !pm — thread ${threadID}`);
                     api.sendMessage("✅ Auto-reply is now ON for this conversation.",threadID);return;
                 }
