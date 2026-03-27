@@ -497,12 +497,14 @@ function startBot() {
                 if (cmd==="vm") {
                     const text=args.slice(1).join(" ");
                     if(!text){api.sendMessage("Usage: !vm <text>",threadID);return;}
-                    const lang=args[args.length-1]==="en"?"en":"tl";
-                    const q=text.replace(/ en$/,"").replace(/ tl$/,"");
-                    const ttsUrl=`https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(q)}&tl=${lang}&client=tw-ob`;
-                    axios.get(ttsUrl,{responseType:"stream",headers:{"User-Agent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},timeout:20000})
+                    const ttsUrl=`https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodeURIComponent(text)}`;
+                    const tmpFile=`/tmp/vm_${Date.now()}.mp3`;
+                    axios.get(ttsUrl,{responseType:"arraybuffer",timeout:20000})
                         .then(r=>{
-                            api.sendMessage({body:"",attachment:r.data},threadID,err=>{
+                            fs.writeFileSync(tmpFile,Buffer.from(r.data));
+                            const stream=fs.createReadStream(tmpFile);
+                            api.sendMessage({body:"",attachment:stream},threadID,err=>{
+                                try{fs.unlinkSync(tmpFile);}catch(_){}
                                 if(err){log("warn",`!vm send failed: ${err.message||err}`);api.sendMessage("❌ Failed to send voice message.",threadID);}
                             });
                         })
@@ -510,7 +512,7 @@ function startBot() {
                             log("warn",`!vm TTS error: ${e.message}`);
                             api.sendMessage("❌ Hindi makapag-generate ng voice message.",threadID);
                         });
-                    log("info",`!vm: "${q}" lang=${lang} in ${threadID}`);return;
+                    log("info",`!vm: "${text}" in ${threadID}`);return;
                 }
                 if (cmd==="test") { api.sendMessage("online ako bobo ka",threadID);return; }
                 if (cmd==="myid") { api.sendMessage(`Your Facebook ID: ${senderID}`,threadID);return; }
@@ -568,7 +570,7 @@ function startBot() {
             if (sharedState.mutedThreads[threadID]) return;
             send("totalReply");
             log("reply",`Auto-reply sent to thread ${threadID}`);
-            setTimeout(()=>sendAutoReply(api,threadID),2000);
+            setTimeout(()=>sendAutoReply(api,threadID),1000);
         }
     });
 }
