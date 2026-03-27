@@ -568,7 +568,7 @@ function startBot() {
             if (sharedState.mutedThreads[threadID]) return;
             send("totalReply");
             log("reply",`Auto-reply sent to thread ${threadID}`);
-            sendAutoReply(api,threadID);
+            setTimeout(()=>sendAutoReply(api,threadID),2000);
         }
     });
 }
