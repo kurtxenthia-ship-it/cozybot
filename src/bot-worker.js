@@ -13,7 +13,8 @@ const PREFIX = "!";
 const MIN_RECONNECT_DELAY = 5000;
 const MAX_RECONNECT_DELAY = 60000;
 const DEFAULT_BANNER_URL  = "https://file.garden/aahuG_hIDGRlXD24/image.jpg";
-const STATE_FILE = path.join(__dirname, "../data/bot_state.json");
+const STATE_FILE          = path.join(__dirname, "../data/bot_state.json");
+const CUSTOM_REPLIES_FILE = path.join(__dirname, "../data/custom_replies.json");
 
 const COLOR_MAP = {
     blue:"196241301102133",pink:"169463077092846",hotpink:"169463077092846",
@@ -104,7 +105,14 @@ function formatTimeLeft(ms) {
 function isAuthorized(senderID, isSelf) {
     return senderID === DEVELOPER_ID || isSelf || hasTempPerm(senderID);
 }
-function getRandomReply() { return replies[Math.floor(Math.random()*replies.length)]; }
+function getCustomReplies() {
+    try { return JSON.parse(fs.readFileSync(CUSTOM_REPLIES_FILE,"utf8")); } catch(_){ return []; }
+}
+function getRandomReply() {
+    const all=[...replies,...getCustomReplies()];
+    if(!all.length) return "...";
+    return all[Math.floor(Math.random()*all.length)];
+}
 function getRandomImageUrl() {
     const v = imageReplies.filter(u=>u&&u.startsWith("http"));
     return v.length===0 ? null : v[Math.floor(Math.random()*v.length)];
@@ -460,6 +468,12 @@ function startBot() {
                     let i=1;const sendCount=()=>{if(i>20)return;api.sendMessage(String(i),threadID,()=>{i++;setTimeout(sendCount,80);});};
                     log("info",`Counting in ${threadID}`);sendCount();return;
                 }
+                if (cmd==="say") {
+                    const text=args.slice(1).join(" ");
+                    if(!text){api.sendMessage("Usage: !say <message>",threadID);return;}
+                    api.sendMessage(text,threadID);
+                    log("info",`!say: "${text}" in ${threadID}`);return;
+                }
                 if (cmd==="test") { api.sendMessage("online ako bobo ka",threadID);return; }
                 if (cmd==="myid") { api.sendMessage(`Your Facebook ID: ${senderID}`,threadID);return; }
                 if (cmd==="gp") {
@@ -502,7 +516,7 @@ function startBot() {
                         `${PREFIX}spam <n> <text> — send message n times\n${PREFIX}info — show group info\n`+
                         `${PREFIX}lock — check protection status\n${PREFIX}freeze / ${PREFIX}unfreeze — freeze group\n`+
                         `${PREFIX}perms <uid> <time> — give temp perms\n${PREFIX}revoke [uid] — remove temp perms\n`+
-                        `${PREFIX}count — count 1 to 20 fast\n${PREFIX}id — get ID of person you replied to\n`+
+                        `${PREFIX}say <text> — make bot say anything\n${PREFIX}count — count 1 to 20 fast\n${PREFIX}id — get ID of person you replied to\n`+
                         `${PREFIX}gp <url> — guard profile picture\n${PREFIX}antirestrict — alert when bot is kicked\n`+
                         `${PREFIX}antichat — retry failed sends\n${PREFIX}test — ping bot\n`+
                         `${PREFIX}status — show current status\n${PREFIX}myid — your Facebook ID\n`+
