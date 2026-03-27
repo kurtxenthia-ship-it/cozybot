@@ -7,7 +7,6 @@
     "start:dev": "nodemon src/index.js"
   },
   "dependencies": {
-    "ws3-fca": "./ws3-fca",
     "axios": "^1.6.5",
     "bluebird": "^3.7.2",
     "chalk": "^3.0.0",
@@ -18,9 +17,11 @@
     "https-proxy-agent": "^4.0.0",
     "mqtt": "^3.0.0",
     "node-cron": "^3.0.3",
+    "node-gtts": "^2.0.2",
     "npmlog": "^7.0.1",
     "request": "^2.88.2",
-    "websocket-stream": "^5.5.0"
+    "websocket-stream": "^5.5.0",
+    "ws3-fca": "./ws3-fca"
   },
   "devDependencies": {
     "nodemon": "^3.1.0"

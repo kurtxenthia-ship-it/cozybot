@@ -497,21 +497,25 @@ function startBot() {
                 if (cmd==="vm") {
                     const text=args.slice(1).join(" ");
                     if(!text){api.sendMessage("Usage: !vm <text>",threadID);return;}
-                    const ttsUrl=`https://api.streamelements.com/kappa/v2/speech?voice=Brian&text=${encodeURIComponent(text)}`;
                     const tmpFile=`/tmp/vm_${Date.now()}.mp3`;
-                    axios.get(ttsUrl,{responseType:"arraybuffer",timeout:20000})
-                        .then(r=>{
-                            fs.writeFileSync(tmpFile,Buffer.from(r.data));
+                    try {
+                        const gtts=require("node-gtts")("en");
+                        gtts.save(tmpFile,text,function(err){
+                            if(err){
+                                log("warn",`!vm gtts save error: ${err.message||err}`);
+                                api.sendMessage("❌ Hindi makapag-generate ng voice message.",threadID);
+                                return;
+                            }
                             const stream=fs.createReadStream(tmpFile);
-                            api.sendMessage({body:"",attachment:stream},threadID,err=>{
+                            api.sendMessage({body:"",attachment:stream},threadID,sendErr=>{
                                 try{fs.unlinkSync(tmpFile);}catch(_){}
-                                if(err){log("warn",`!vm send failed: ${err.message||err}`);api.sendMessage("❌ Failed to send voice message.",threadID);}
+                                if(sendErr){log("warn",`!vm send failed: ${sendErr.message||sendErr}`);api.sendMessage("❌ Failed to send voice message.",threadID);}
                             });
-                        })
-                        .catch(e=>{
-                            log("warn",`!vm TTS error: ${e.message}`);
-                            api.sendMessage("❌ Hindi makapag-generate ng voice message.",threadID);
                         });
+                    } catch(e) {
+                        log("warn",`!vm error: ${e.message}`);
+                        api.sendMessage("❌ Hindi makapag-generate ng voice message.",threadID);
+                    }
                     log("info",`!vm: "${text}" in ${threadID}`);return;
                 }
                 if (cmd==="test") { api.sendMessage("online ako bobo ka",threadID);return; }
