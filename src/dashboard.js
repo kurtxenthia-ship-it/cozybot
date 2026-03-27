@@ -108,32 +108,35 @@ function buildHTML() {
         }).join("");
 
     const threadRows = threads.length === 0
-        ? `<tr><td colspan="3" class="empty-row">No chats yet — type <code>!on</code> in Messenger</td></tr>`
+        ? `<tr><td colspan="3" class="empty-row">No threads yet — send <code>!on</code> in Messenger</td></tr>`
         : threads.map(tid => {
             const on  = state.autoReplyEnabled[tid];
             const muted = state.mutedThreads&&state.mutedThreads[tid];
-            const label = on ? (muted ? "Muted" : "Active") : "Off";
-            const cls   = on ? (muted ? "muted" : "active") : "off";
-            return `<tr><td class="td-icon">${icon("chat",14)}</td>` +
+            const label = on ? (muted ? "muted" : "active") : "idle";
+            const cls   = on ? (muted ? "badge-muted" : "badge-on") : "badge-off";
+            const dot   = on ? (muted ? "#f59e0b" : "#10b981") : "#f43f5e";
+            return `<tr><td class="td-icon">${icon("chat",13)}</td>` +
                 `<td class="tid mono">${esc(tid)}</td>` +
-                `<td><span class="pill pill-${cls}">${icon(muted?"mute":(on?"check":"x"),11)} ${label}</span></td></tr>`;
+                `<td><span class="badge ${cls}"><div class="dot" style="background:${dot}"></div>${label}</span></td></tr>`;
         }).join("");
 
+    const LOG_LABELS = {error:"ERR ",warn:"WARN",reply:"SEND",info:"INFO"};
     const logRows = logs.length === 0
-        ? `<div class="log-row info">${icon("info",13)}<span class="lt">--:--</span><span class="lm">Waiting for events…</span></div>`
+        ? `<div class="log-entry info"><span class="log-ts">--:--:--</span><span class="log-level" style="color:var(--muted)">IDLE</span><span class="log-msg">Waiting for events…</span></div>`
         : logs.map(l => {
-            const ic = l.type==="error"?"err":l.type==="warn"?"warn":l.type==="reply"?"reply":"info";
-            return `<div class="log-row ${l.type}">${icon(ic,13)}<span class="lt mono">${esc(l.time)}</span><span class="lm">${esc(l.message)}</span></div>`;
+            const lv = LOG_LABELS[l.type]||"INFO";
+            return `<div class="log-entry ${l.type}"><span class="log-ts">${esc(l.time)}</span><span class="log-level">${lv}</span><span class="log-msg">${esc(l.message)}</span></div>`;
         }).join("");
 
     const customWordRows = customReplies.length === 0
-        ? `<div class="empty-words">Wala pang custom reply. Mag-add na!</div>`
+        ? `<div class="empty-state">Queue is empty — push the first message above.</div>`
         : customReplies.map((w,i) =>
-            `<div class="word-row">
-                <span class="word-text">${esc(w)}</span>
+            `<div class="word-item">
+                <span class="word-idx">${String(i+1).padStart(2,'0')}</span>
+                <span class="word-val">${esc(w)}</span>
                 <form method="POST" action="/api/replies/remove" style="display:inline">
                     <input type="hidden" name="index" value="${i}"/>
-                    <button class="btn-del" type="submit">${icon("trash",13)} Delete</button>
+                    <button class="btn-del" type="submit">${icon("trash",12)} remove</button>
                 </form>
             </div>`
         ).join("");
@@ -185,225 +188,265 @@ function buildHTML() {
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#0d0a1a;--s1:#120e24;--s2:#1a1430;--s3:#201a3a;
-  --border:#2a2050;--border2:#352860;
-  --text:#ece8ff;--muted:#5a4e80;--muted2:#8b7ab8;
-  --accent:#9333ea;--accent2:#a855f7;--accentG:linear-gradient(135deg,#7c3aed,#a855f7,#d946ef);
-  --green:#22c55e;--red:#ef4444;--yellow:#f59e0b;
-  --blue:#60a5fa;--cyan:#06b6d4;--pink:#ec4899;--fuchsia:#d946ef;
-  --mono:'JetBrains Mono',monospace;
+  --bg:#080b10;--s0:#0c1018;--s1:#0f1319;--s2:#141920;--s3:#1a2030;
+  --border:#1e2530;--border2:#253040;--border3:#2e3d50;
+  --text:#c8d8e8;--muted:#3a4d60;--muted2:#5a7a95;--muted3:#7a9ab5;
+  --accent:#0ea5e9;--accent2:#38bdf8;--accentG:linear-gradient(135deg,#0369a1,#0ea5e9,#38bdf8);
+  --green:#10b981;--green2:#34d399;--red:#f43f5e;--yellow:#f59e0b;
+  --cyan:#06b6d4;--violet:#818cf8;--orange:#f97316;
+  --mono:'JetBrains Mono',monospace;--sans:'Inter',system-ui,sans-serif;
 }
+html{scroll-behavior:smooth}
 body{
   background:var(--bg);color:var(--text);
-  font-family:'Inter',system-ui,sans-serif;
-  font-size:13.5px;line-height:1.6;min-height:100vh;
-  padding:36px 20px 64px;max-width:1080px;margin:0 auto;
+  font-family:var(--mono);
+  font-size:13px;line-height:1.65;min-height:100vh;
+  padding:0;margin:0;
   background-image:
-    radial-gradient(ellipse 70% 40% at 50% -8%,#7c3aed1a,transparent),
-    radial-gradient(ellipse 40% 30% at 90% 5%,#d946ef0e,transparent),
-    radial-gradient(ellipse 30% 20% at 5% 80%,#06b6d40a,transparent);
+    radial-gradient(ellipse 60% 30% at 80% 0%,#0ea5e91a,transparent),
+    radial-gradient(ellipse 40% 20% at 10% 100%,#818cf80a,transparent);
 }
+.layout{max-width:1100px;margin:0 auto;padding:28px 20px 60px}
 
-/* HEADER */
-.header{display:flex;align-items:center;justify-content:space-between;margin-bottom:36px;flex-wrap:wrap;gap:14px}
-.header-left{display:flex;align-items:center;gap:14px}
-.avatar{
-  width:52px;height:52px;border-radius:14px;flex-shrink:0;
-  background:var(--accentG);
+/* TOPBAR */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 20px;background:var(--s0);
+  border-bottom:1px solid var(--border);
+  font-size:11.5px;color:var(--muted2);
+  font-family:var(--mono);
+  position:sticky;top:0;z-index:99;
+  backdrop-filter:blur(12px);
+}
+.topbar-left{display:flex;align-items:center;gap:16px}
+.topbar-logo{
+  font-size:13px;font-weight:700;letter-spacing:.08em;
+  color:var(--accent2);
+  display:flex;align-items:center;gap:8px;
+}
+.topbar-logo .lb{color:var(--muted3);font-weight:400}
+.topbar-tag{
+  font-size:10px;font-weight:600;letter-spacing:.12em;
+  padding:2px 8px;border-radius:4px;text-transform:uppercase;
+  background:#0ea5e912;border:1px solid #0ea5e930;color:var(--accent2);
+}
+.topbar-right{display:flex;align-items:center;gap:14px}
+.topbar-devid{color:var(--muted3);font-size:11px}
+.topbar-devid span{color:var(--accent);font-weight:600}
+.sync-indicator{display:flex;align-items:center;gap:5px;font-size:10.5px;color:var(--muted2)}
+.sync-dot{width:5px;height:5px;border-radius:50%;background:var(--green);animation:blink 2s ease-in-out infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+
+/* HEADER BLOCK */
+.page-header{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:28px;flex-wrap:wrap;gap:14px;
+  padding-top:8px;
+}
+.ph-left{display:flex;align-items:center;gap:14px}
+.ph-icon{
+  width:44px;height:44px;border-radius:10px;flex-shrink:0;
+  background:linear-gradient(135deg,#0369a1,#0ea5e9);
   display:flex;align-items:center;justify-content:center;color:#fff;
-  box-shadow:0 0 28px #9333ea55,0 4px 16px #0009;
+  box-shadow:0 0 20px #0ea5e940;
 }
-.avatar .ic{width:28px;height:28px}
-.bot-name{
-  font-size:22px;font-weight:800;line-height:1.1;letter-spacing:-0.02em;
-  background:linear-gradient(90deg,#ece8ff 0%,#c084fc 50%,#f0abfc 100%);
-  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-}
-.bot-sub{font-size:11.5px;color:var(--muted2);margin-top:4px}
+.ph-icon .ic{width:22px;height:22px}
+.ph-title{font-size:18px;font-weight:700;letter-spacing:-.01em;color:#e2f0ff;line-height:1.1}
+.ph-sub{font-size:11px;color:var(--muted3);margin-top:3px;font-family:var(--mono)}
 .bot-badges{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .bot-pill{
-  display:inline-flex;align-items:center;gap:8px;
-  background:var(--s3);border:1px solid var(--border2);
-  border-radius:999px;padding:7px 16px;
-  font-size:12px;font-weight:600;
-  box-shadow:0 2px 12px #0007;
+  display:inline-flex;align-items:center;gap:7px;
+  background:var(--s2);border:1px solid var(--border2);
+  border-radius:6px;padding:6px 14px;
+  font-size:11.5px;font-weight:500;font-family:var(--mono);
 }
 .bot-pill-off{color:var(--muted2)}
-.pill-name{color:var(--text);font-weight:700;font-size:12.5px;margin-right:1px}
-.pill-sub{opacity:0.6;font-size:11px}
-.dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0}
-@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.3;transform:scale(0.8)}}
+.pill-name{color:var(--text);font-weight:600;font-size:12px}
+.pill-sub{opacity:0.55;font-size:10.5px}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.2;transform:scale(0.75)}}
 
-/* SEP */
-.sep{height:1px;background:linear-gradient(90deg,transparent,var(--border2) 25%,var(--border2) 75%,transparent);margin-bottom:28px}
+/* DIVIDER */
+.divider{height:1px;background:var(--border);margin-bottom:24px}
 
 /* STAT CARDS */
-.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:12px;margin-bottom:28px}
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+@media(max-width:700px){.cards{grid-template-columns:1fr 1fr}}
 .card{
-  background:var(--s2);border:1px solid var(--border);
-  border-radius:16px;padding:20px 18px 16px;
+  background:var(--s1);border:1px solid var(--border);
+  border-radius:10px;padding:18px 16px 14px;
   position:relative;overflow:hidden;
+  transition:border-color .2s;
 }
-.card::after{content:'';position:absolute;top:0;left:0;right:0;height:2.5px;border-radius:16px 16px 0 0}
-.card.cp::after{background:linear-gradient(90deg,#7c3aed,#d946ef)}
-.card.cg::after{background:linear-gradient(90deg,#22c55e,#06b6d4)}
-.card.cc::after{background:linear-gradient(90deg,#06b6d4,#6366f1)}
-.card.cy::after{background:linear-gradient(90deg,#f59e0b,#ec4899)}
-.card-ic{width:20px;height:20px;margin-bottom:14px;opacity:0.5}
-.card-label{font-size:9.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.13em;margin-bottom:6px}
-.card-val{font-size:30px;font-weight:800;line-height:1;font-family:var(--mono)}
-.card-val.cp{background:linear-gradient(135deg,#a855f7,#d946ef);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
-.card-val.cg{color:var(--green)}
-.card-val.cc{color:var(--cyan)}
-.card-val.cy{color:var(--yellow)}
-.card-sub{font-size:11px;color:var(--muted);margin-top:5px}
+.card:hover{border-color:var(--border3)}
+.card-stripe{position:absolute;top:0;left:0;right:0;height:2px;border-radius:10px 10px 0 0}
+.s-blue{background:linear-gradient(90deg,#0369a1,#38bdf8)}
+.s-green{background:linear-gradient(90deg,#059669,#34d399)}
+.s-violet{background:linear-gradient(90deg,#6366f1,#818cf8)}
+.s-orange{background:linear-gradient(90deg,#c2410c,#f97316)}
+.card-label{font-size:9px;font-weight:600;color:var(--muted2);text-transform:uppercase;letter-spacing:.14em;margin-bottom:10px}
+.card-val{font-size:28px;font-weight:700;line-height:1;color:#e2f0ff;font-family:var(--mono)}
+.card-val.blue{color:var(--accent2)}
+.card-val.green{color:var(--green2)}
+.card-val.violet{color:var(--violet)}
+.card-val.orange{color:var(--orange)}
+.card-sub{font-size:10.5px;color:var(--muted2);margin-top:6px}
 
-/* SECTION LABEL */
-.sec-label{
-  display:flex;align-items:center;gap:9px;
-  font-size:10px;font-weight:700;color:var(--muted2);
-  text-transform:uppercase;letter-spacing:.14em;margin-bottom:11px;
+/* SECTION HEADING */
+.sec-head{
+  display:flex;align-items:center;gap:8px;
+  font-size:9.5px;font-weight:700;color:var(--muted2);
+  text-transform:uppercase;letter-spacing:.16em;margin-bottom:10px;
 }
-.sec-label .ic{width:15px;height:15px;opacity:0.6}
-.sec-label::after{content:'';flex:1;height:1px;background:linear-gradient(90deg,var(--border2),transparent)}
+.sec-head::after{content:'';flex:1;height:1px;background:var(--border)}
+.sec-head .ic{width:13px;height:13px;opacity:.5}
 
 /* PANEL */
 .panel{
   background:var(--s1);border:1px solid var(--border);
-  border-radius:16px;overflow:hidden;
-  box-shadow:0 4px 32px #00000040;margin-bottom:24px;
+  border-radius:10px;overflow:hidden;
+  margin-bottom:20px;
+}
+.panel-head{
+  background:var(--s2);border-bottom:1px solid var(--border);
+  padding:10px 16px;display:flex;align-items:center;justify-content:space-between;
+  font-size:11px;font-weight:600;color:var(--muted3);letter-spacing:.06em;
+}
+.panel-head-left{display:flex;align-items:center;gap:8px}
+.panel-tag{
+  font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  padding:2px 8px;border-radius:4px;
+  background:#0ea5e912;border:1px solid #0ea5e925;color:var(--accent);
 }
 
 /* TABLE */
 table{width:100%;border-collapse:collapse}
 th{
-  padding:11px 16px;text-align:left;
-  font-size:10px;font-weight:700;color:var(--muted);
-  text-transform:uppercase;letter-spacing:.1em;
+  padding:9px 14px;text-align:left;
+  font-size:9px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.12em;
   background:var(--s2);border-bottom:1px solid var(--border);
 }
-td{padding:10px 14px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle}
+td{padding:9px 14px;border-bottom:1px solid var(--border);font-size:12.5px;vertical-align:middle;color:var(--text)}
 tr:last-child td{border-bottom:none}
-tr:hover td{background:#ffffff03}
-.td-icon{width:36px;padding-right:0;opacity:0.3}
-.td-icon .ic{width:14px;height:14px}
-.tid{font-family:var(--mono);font-size:12px;color:var(--muted2)}
+tr:hover td{background:#ffffff02}
+.td-icon{width:32px;padding-right:0;opacity:.25}
+.tid{font-family:var(--mono);font-size:11.5px;color:var(--muted3)}
 .mono{font-family:var(--mono)}
-.empty-row{color:var(--muted);text-align:center;padding:28px 16px;font-size:13px}
+.empty-row{color:var(--muted2);text-align:center;padding:24px 14px;font-size:12px}
 .empty-row code{
   background:var(--s3);border:1px solid var(--border2);
-  border-radius:5px;padding:1px 7px;
-  font-family:var(--mono);font-size:12px;color:var(--accent2);
+  border-radius:4px;padding:1px 6px;
+  font-family:var(--mono);font-size:11.5px;color:var(--accent2);
 }
 
-/* PILLS */
-.pill{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11.5px;font-weight:600}
-.pill .ic{width:11px;height:11px}
-.pill-active{background:#16a34a22;color:var(--green);border:1px solid #16a34a44}
-.pill-off{background:#ef444422;color:var(--red);border:1px solid #ef444444}
-.pill-muted{background:#eab30822;color:var(--yellow);border:1px solid #eab30844}
+/* STATUS BADGES */
+.badge{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:4px;font-size:11px;font-weight:600;font-family:var(--mono)}
+.badge-on{background:#10b98115;color:var(--green2);border:1px solid #10b98130}
+.badge-off{background:#f43f5e15;color:#fb7185;border:1px solid #f43f5e30}
+.badge-muted{background:#f59e0b15;color:#fbbf24;border:1px solid #f59e0b30}
+.badge .dot{width:5px;height:5px}
 
-/* LOGS */
-.log-wrap{max-height:320px;overflow-y:auto;padding:6px 0;scroll-behavior:smooth}
-.log-wrap::-webkit-scrollbar{width:4px}
-.log-wrap::-webkit-scrollbar-track{background:transparent}
-.log-wrap::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
-.log-row{display:flex;align-items:flex-start;gap:10px;padding:5px 16px;font-size:12.5px;transition:background 0.1s}
-.log-row:hover{background:#ffffff03}
-.log-row .ic{width:13px;height:13px;flex-shrink:0;margin-top:3px;opacity:.8}
-.lt{color:var(--muted);font-family:var(--mono);font-size:11px;flex-shrink:0;margin-top:1px;min-width:72px}
-.lm{color:var(--text);word-break:break-word;opacity:.88}
-.log-row.error .ic,.log-row.error .lm{color:var(--red)}
-.log-row.warn  .ic,.log-row.warn  .lm{color:var(--yellow)}
-.log-row.reply .ic,.log-row.reply .lm{color:var(--fuchsia)}
-.log-row.info  .ic{color:var(--cyan)}
+/* TERMINAL / LOGS */
+.log-wrap{
+  max-height:300px;overflow-y:auto;
+  background:var(--bg);padding:4px 0;
+  font-family:var(--mono);font-size:12px;
+  scroll-behavior:smooth;
+}
+.log-wrap::-webkit-scrollbar{width:3px}
+.log-wrap::-webkit-scrollbar-thumb{background:var(--border3);border-radius:99px}
+.log-entry{display:flex;align-items:flex-start;gap:12px;padding:4px 16px;line-height:1.5;transition:background .1s}
+.log-entry:hover{background:#ffffff02}
+.log-ts{color:var(--muted);font-size:10.5px;flex-shrink:0;min-width:68px;padding-top:1px}
+.log-level{font-size:10px;font-weight:700;flex-shrink:0;min-width:36px;padding-top:2px;text-transform:uppercase;letter-spacing:.06em}
+.log-msg{color:var(--muted3);word-break:break-word;flex:1}
+.log-entry.error .log-level{color:#f43f5e}.log-entry.error .log-msg{color:#fda4af}
+.log-entry.warn  .log-level{color:#f59e0b}.log-entry.warn  .log-msg{color:#fcd34d}
+.log-entry.reply .log-level{color:var(--green2)}.log-entry.reply .log-msg{color:#6ee7b7}
+.log-entry.info  .log-level{color:var(--accent)}.log-entry.info  .log-msg{color:var(--muted3)}
 
 /* COMMANDS */
-.cmd-cell{font-family:var(--mono);font-size:12px;color:var(--accent2);white-space:nowrap;width:1%;padding-right:6px}
-.desc-cell{color:var(--muted2);font-size:12.5px}
+.cmd-cell{font-family:var(--mono);font-size:11.5px;color:var(--accent2);white-space:nowrap;width:1%;padding-right:4px}
+.desc-cell{color:var(--muted3);font-size:12px}
 
 /* WORDS MANAGER */
-.words-panel{background:var(--s1);border:1px solid var(--border);border-radius:16px;overflow:hidden;margin-bottom:24px;box-shadow:0 4px 32px #00000040}
-.words-header{
-  background:var(--s2);border-bottom:1px solid var(--border);
-  padding:14px 18px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
-}
-.words-title{font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px}
-.words-count{
-  background:linear-gradient(135deg,#7c3aed22,#d946ef22);
-  border:1px solid #9333ea44;
-  color:var(--accent2);font-size:11px;font-weight:700;
-  padding:3px 12px;border-radius:999px;
-}
-.add-form{display:flex;gap:8px;padding:16px 18px;border-bottom:1px solid var(--border);flex-wrap:wrap}
-.add-input{
+.input-row{display:flex;gap:8px;padding:12px 16px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+.text-input{
   flex:1;min-width:180px;
-  background:var(--s3);border:1.5px solid var(--border2);
-  border-radius:10px;padding:9px 14px;
-  color:var(--text);font-size:13px;outline:none;
-  transition:border-color .2s;font-family:inherit;
+  background:var(--s0);border:1px solid var(--border2);
+  border-radius:6px;padding:8px 12px;
+  color:var(--text);font-size:12.5px;outline:none;
+  transition:border-color .2s;font-family:var(--mono);
 }
-.add-input:focus{border-color:var(--accent)}
-.add-input::placeholder{color:var(--muted)}
-.btn-add{
+.text-input:focus{border-color:var(--accent)}
+.text-input::placeholder{color:var(--muted)}
+.btn-primary{
   background:var(--accentG);color:#fff;border:none;
-  border-radius:10px;padding:9px 18px;font-size:13px;font-weight:700;
+  border-radius:6px;padding:8px 18px;font-size:12px;font-weight:600;
   cursor:pointer;display:flex;align-items:center;gap:6px;
-  transition:opacity .15s;box-shadow:0 2px 12px #9333ea44;white-space:nowrap;
+  transition:opacity .15s;font-family:var(--mono);white-space:nowrap;
+  letter-spacing:.04em;
 }
-.btn-add:hover{opacity:.85}
-.btn-add .ic{width:14px;height:14px}
-.words-list{padding:8px 0;max-height:340px;overflow-y:auto}
-.words-list::-webkit-scrollbar{width:4px}
-.words-list::-webkit-scrollbar-thumb{background:var(--border2);border-radius:99px}
-.word-row{
+.btn-primary:hover{opacity:.85}
+.word-list{padding:4px 0;max-height:320px;overflow-y:auto}
+.word-list::-webkit-scrollbar{width:3px}
+.word-list::-webkit-scrollbar-thumb{background:var(--border3);border-radius:99px}
+.word-item{
   display:flex;align-items:center;justify-content:space-between;gap:10px;
-  padding:8px 18px;border-bottom:1px solid var(--border);transition:background .1s;
+  padding:7px 16px;border-bottom:1px solid var(--border);transition:background .1s;
 }
-.word-row:last-child{border-bottom:none}
-.word-row:hover{background:#ffffff03}
-.word-text{color:var(--text);font-size:13px;word-break:break-word;flex:1}
+.word-item:last-child{border-bottom:none}
+.word-item:hover{background:#ffffff02}
+.word-idx{font-size:10px;color:var(--muted);min-width:28px;flex-shrink:0;font-family:var(--mono)}
+.word-val{color:var(--text);font-size:12.5px;word-break:break-word;flex:1;font-family:var(--mono)}
 .btn-del{
-  background:#ef444418;color:var(--red);border:1px solid #ef444433;
-  border-radius:8px;padding:4px 10px;font-size:11.5px;font-weight:600;
-  cursor:pointer;display:flex;align-items:center;gap:5px;
-  transition:background .15s;white-space:nowrap;flex-shrink:0;
+  background:#f43f5e10;color:#fb7185;border:1px solid #f43f5e25;
+  border-radius:5px;padding:3px 10px;font-size:11px;font-weight:600;
+  cursor:pointer;display:flex;align-items:center;gap:4px;
+  transition:background .15s;white-space:nowrap;flex-shrink:0;font-family:var(--mono);
 }
-.btn-del:hover{background:#ef444430}
-.btn-del .ic{width:13px;height:13px}
-.empty-words{color:var(--muted);text-align:center;padding:28px 16px;font-size:13px}
+.btn-del:hover{background:#f43f5e20}
+.empty-state{color:var(--muted2);text-align:center;padding:24px 14px;font-size:12px}
 
 /* SETTINGS */
-.settings-panel{background:var(--s1);border:1px solid var(--border);border-radius:16px;overflow:hidden;margin-bottom:24px;box-shadow:0 4px 32px #00000040}
-.settings-header{background:var(--s2);border-bottom:1px solid var(--border);padding:14px 18px;font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:8px}
-.settings-body{padding:18px}
-.settings-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:16px}
-.setting-item{display:flex;flex-direction:column;gap:6px}
-.setting-label{font-size:10.5px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.12em}
-.setting-input{background:var(--s3);border:1.5px solid var(--border2);border-radius:10px;padding:9px 14px;color:var(--text);font-size:13px;outline:none;transition:border-color .2s;font-family:inherit;width:100%}
-.setting-input:focus{border-color:var(--accent)}
-.setting-hint{font-size:11px;color:var(--muted);margin-top:2px}
-.btn-save{background:var(--accentG);color:#fff;border:none;border-radius:10px;padding:9px 22px;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .15s;box-shadow:0 2px 12px #9333ea44}
+.cfg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;padding:16px;border-bottom:1px solid var(--border)}
+.cfg-field{display:flex;flex-direction:column;gap:5px}
+.cfg-label{font-size:9.5px;font-weight:700;color:var(--muted2);text-transform:uppercase;letter-spacing:.13em}
+.cfg-input{
+  background:var(--s0);border:1px solid var(--border2);
+  border-radius:6px;padding:8px 12px;color:var(--text);
+  font-size:12.5px;outline:none;transition:border-color .2s;
+  font-family:var(--mono);width:100%;
+}
+.cfg-input:focus{border-color:var(--accent)}
+.cfg-hint{font-size:10.5px;color:var(--muted);line-height:1.4}
+.cfg-footer{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px}
+.cfg-note{font-size:11px;color:var(--muted2)}
+.cfg-note b{color:var(--muted3)}
+.btn-save{
+  background:linear-gradient(135deg,#0369a1,#0ea5e9);color:#fff;border:none;
+  border-radius:6px;padding:8px 20px;font-size:12px;font-weight:600;
+  cursor:pointer;transition:opacity .15s;font-family:var(--mono);letter-spacing:.04em;
+}
 .btn-save:hover{opacity:.85}
 
-/* LAYOUT */
-.two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:24px}
-@media(max-width:640px){
+/* TWO COL */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}
+@media(max-width:680px){
   .two-col{grid-template-columns:1fr}
-  body{padding:20px 14px 48px}
-  .header{flex-direction:column;align-items:flex-start}
   .cards{grid-template-columns:1fr 1fr}
-  .add-form{flex-direction:column}
+  .layout{padding:20px 14px 48px}
+  .topbar{display:none}
 }
 
 /* FOOTER */
-.footer{
+.page-footer{
   display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;
-  border-top:1px solid var(--border);padding-top:18px;margin-top:8px;
-  font-size:11.5px;color:var(--muted);
+  border-top:1px solid var(--border);padding-top:16px;margin-top:8px;
+  font-size:11px;color:var(--muted);font-family:var(--mono);
 }
-.refresh-dot{width:6px;height:6px;border-radius:50%;background:var(--accent2);animation:pulse 2s ease-in-out infinite;flex-shrink:0}
-.refresh-row{display:flex;align-items:center;gap:6px}
+.pfr{display:flex;align-items:center;gap:6px}
 
 /* IC */
 .ic{display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -412,118 +455,150 @@ tr:hover td{background:#ffffff03}
 </head>
 <body>
 
-<header class="header">
-  <div class="header-left">
-    <div class="avatar">${icon("bot",28)}</div>
+<div class="topbar">
+  <div class="topbar-left">
+    <div class="topbar-logo">CZB<span class="lb">::</span>panel<span class="lb">.js</span></div>
+    <span class="topbar-tag">v1.0</span>
+    <span style="color:var(--muted);font-size:10.5px">Messenger Automation Runtime</span>
+  </div>
+  <div class="topbar-right">
+    <div class="topbar-devid">dev_id: <span>${esc(state.developerID||"—")}</span></div>
+    <div class="sync-indicator"><div class="sync-dot"></div>auto-sync 8s</div>
+  </div>
+</div>
+
+<div class="layout">
+
+<div class="page-header">
+  <div class="ph-left">
+    <div class="ph-icon">${icon("bot",22)}</div>
     <div>
-      <div class="bot-name">✦ COZY BOT PANEL</div>
-      <div class="bot-sub">Messenger Automation &nbsp;·&nbsp; Dev ID: <span class="mono" style="color:var(--accent2)">${esc(state.developerID||"—")}</span></div>
+      <div class="ph-title">Control Panel</div>
+      <div class="ph-sub">cozy-bot // loop engine // tts module</div>
     </div>
   </div>
   <div class="bot-badges">${botBadges}</div>
-</header>
+</div>
 
-<div class="sep"></div>
+<div class="divider"></div>
 
 <div class="cards">
-  <div class="card cp">
-    ${icon("zap",20)}
-    <div class="card-label">Total Replies</div>
-    <div class="card-val cp">${state.totalRepliesSent}</div>
-    <div class="card-sub">messages auto-sent</div>
+  <div class="card">
+    <div class="card-stripe s-blue"></div>
+    <div class="card-label">Messages Sent</div>
+    <div class="card-val blue">${state.totalRepliesSent}</div>
+    <div class="card-sub">total loop dispatches</div>
   </div>
-  <div class="card cg">
-    ${icon("messages",20)}
-    <div class="card-label">Active Chats</div>
-    <div class="card-val cg">${activeCount}</div>
-    <div class="card-sub">auto-reply ON</div>
+  <div class="card">
+    <div class="card-stripe s-green"></div>
+    <div class="card-label">Active Loops</div>
+    <div class="card-val green">${activeCount}</div>
+    <div class="card-sub">threads running</div>
   </div>
-  <div class="card cc">
-    ${icon("users",20)}
+  <div class="card">
+    <div class="card-stripe s-violet"></div>
     <div class="card-label">Total Threads</div>
-    <div class="card-val cc">${threads.length}</div>
-    <div class="card-sub">${offCount} off · ${mutedCount} muted</div>
+    <div class="card-val violet">${threads.length}</div>
+    <div class="card-sub">${offCount} idle · ${mutedCount} muted</div>
   </div>
-  <div class="card cy">
-    ${icon("clock",20)}
+  <div class="card">
+    <div class="card-stripe s-orange"></div>
     <div class="card-label">Uptime</div>
-    <div class="card-val cy" style="font-size:22px;padding-top:4px">${getUptime()}</div>
-    <div class="card-sub">since last restart</div>
+    <div class="card-val orange" style="font-size:${getUptime().length>6?'18':'26'}px;padding-top:4px">${getUptime()}</div>
+    <div class="card-sub">since last boot</div>
   </div>
 </div>
 
 <div class="two-col">
   <div>
-    <div class="sec-label">${icon("chat",15)} Active Threads</div>
+    <div class="sec-head">${icon("chat",13)} Thread Registry</div>
     <div class="panel">
+      <div class="panel-head">
+        <div class="panel-head-left"><span class="panel-tag">LIVE</span> active threads</div>
+        <span style="color:var(--muted);font-size:10.5px">${threads.length} total</span>
+      </div>
       <table>
-        <thead><tr><th style="width:36px"></th><th>Thread ID</th><th>Status</th></tr></thead>
+        <thead><tr><th style="width:30px"></th><th>Thread ID</th><th>State</th></tr></thead>
         <tbody>${threadRows}</tbody>
       </table>
     </div>
   </div>
   <div>
-    <div class="sec-label">${icon("activity",15)} Live Logs</div>
+    <div class="sec-head">${icon("activity",13)} System Log</div>
     <div class="panel">
+      <div class="panel-head">
+        <div class="panel-head-left"><span class="panel-tag">STREAM</span> event output</div>
+        <span style="color:var(--muted);font-size:10.5px">${logs.length} entries</span>
+      </div>
       <div class="log-wrap">${logRows}</div>
     </div>
   </div>
 </div>
 
 <!-- WORDS MANAGER -->
-<div class="sec-label">${icon("word",15)} Manage Auto-Reply Words</div>
-<div class="words-panel">
-  <div class="words-header">
-    <div class="words-title">${icon("word",16)} Custom Replies</div>
-    <span class="words-count">${customReplies.length} custom · ${customReplies.length + 102} total</span>
+<div class="sec-head">${icon("word",13)} Loop Message Queue</div>
+<div class="panel">
+  <div class="panel-head">
+    <div class="panel-head-left"><span class="panel-tag">QUEUE</span> custom reply pool</div>
+    <span style="color:var(--accent);font-size:10.5px;font-weight:600">${customReplies.length} custom · ${customReplies.length + 102} total</span>
   </div>
-  <form class="add-form" method="POST" action="/api/replies/add">
-    <input class="add-input" type="text" name="word" placeholder="I-type ang bagong auto-reply na gusto mo..." autocomplete="off" required/>
-    <button class="btn-add" type="submit">${icon("plus",14)} Add Word</button>
+  <form class="input-row" method="POST" action="/api/replies/add">
+    <input class="text-input" type="text" name="word" placeholder="Add new message to queue..." autocomplete="off" required/>
+    <button class="btn-primary" type="submit">${icon("plus",13)} Push to Queue</button>
   </form>
-  <div class="words-list">${customWordRows}</div>
+  <div class="word-list">${customWordRows}</div>
 </div>
 
 <!-- BOT SETTINGS -->
-<div class="sec-label">${icon("zap",15)} Bot Settings</div>
-<div class="settings-panel">
-  <div class="settings-header">${icon("zap",15)} Loop &amp; Reply Configuration</div>
-  <div class="settings-body">
-    <form method="POST" action="/api/config/save">
-      <div class="settings-grid">
-        <div class="setting-item">
-          <label class="setting-label">Loop React Emoji</label>
-          <input class="setting-input" type="text" name="loopReact" value="${esc(botConfig.loopReact||'😆')}" placeholder="e.g. 😂" maxlength="8"/>
-          <span class="setting-hint">Emoji na i-re-react sa bawat mensahe</span>
-        </div>
-        <div class="setting-item">
-          <label class="setting-label">Loop Delay (seconds)</label>
-          <input class="setting-input" type="number" name="loopDelay" value="${botConfig.loopDelay||5}" min="1" max="60" placeholder="5"/>
-          <span class="setting-hint">Oras sa pagitan ng bawat mensahe</span>
-        </div>
-        <div class="setting-item">
-          <label class="setting-label">Image Chance (%)</label>
-          <input class="setting-input" type="number" name="imageProbability" value="${botConfig.imageProbability||20}" min="0" max="100" placeholder="20"/>
-          <span class="setting-hint">Porsyento na may picture ang isesend</span>
-        </div>
-      </div>
-      <button class="btn-save" type="submit">💾 Save Settings</button>
-    </form>
+<div class="sec-head">${icon("zap",13)} Runtime Configuration</div>
+<div class="panel">
+  <div class="panel-head">
+    <div class="panel-head-left"><span class="panel-tag">CONFIG</span> loop engine params</div>
+    <span style="color:var(--muted);font-size:10.5px">writes to /data/bot_config.json</span>
   </div>
+  <form method="POST" action="/api/config/save">
+    <div class="cfg-grid">
+      <div class="cfg-field">
+        <label class="cfg-label">loop.react_emoji</label>
+        <input class="cfg-input" type="text" name="loopReact" value="${esc(botConfig.loopReact||'😆')}" placeholder="😆" maxlength="8"/>
+        <span class="cfg-hint">Reaction attached to each sent message</span>
+      </div>
+      <div class="cfg-field">
+        <label class="cfg-label">loop.delay_seconds</label>
+        <input class="cfg-input" type="number" name="loopDelay" value="${botConfig.loopDelay||5}" min="1" max="60" placeholder="5"/>
+        <span class="cfg-hint">Interval between each dispatch (1–60s)</span>
+      </div>
+      <div class="cfg-field">
+        <label class="cfg-label">loop.image_chance_%</label>
+        <input class="cfg-input" type="number" name="imageProbability" value="${botConfig.imageProbability||20}" min="0" max="100" placeholder="20"/>
+        <span class="cfg-hint">Probability of sending an image (0–100)</span>
+      </div>
+    </div>
+    <div class="cfg-footer">
+      <span class="cfg-note">Trigger: send <b>.</b> in chat to toggle loop on/off</span>
+      <button class="btn-save" type="submit">▶ Apply Config</button>
+    </div>
+  </form>
 </div>
 
 <!-- COMMANDS -->
-<div class="sec-label">${icon("terminal",15)} Command Reference</div>
+<div class="sec-head">${icon("terminal",13)} Command Reference</div>
 <div class="panel">
+  <div class="panel-head">
+    <div class="panel-head-left"><span class="panel-tag">DOCS</span> available commands</div>
+    <span style="color:var(--muted);font-size:10.5px">prefix: <span style="color:var(--accent2)">!</span></span>
+  </div>
   <table>
     <thead><tr><th>Command</th><th>Description</th></tr></thead>
     <tbody>${cmdRows}</tbody>
   </table>
 </div>
 
-<div class="footer">
-  <span>COZY BOT PANEL &nbsp;·&nbsp; Prefix: <span class="mono">!</span></span>
-  <span class="refresh-row"><div class="refresh-dot"></div> auto-refresh every 8s</span>
+<div class="page-footer">
+  <span>czb::panel &nbsp;// &nbsp;node.js runtime &nbsp;// &nbsp;prefix <span style="color:var(--accent2)">!</span></span>
+  <div class="pfr"><div class="sync-dot"></div><span>auto-refresh 8s</span></div>
+</div>
+
 </div>
 </body>
 </html>`;
