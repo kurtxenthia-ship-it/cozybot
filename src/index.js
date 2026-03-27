@@ -24,6 +24,7 @@ const sharedState = {
     nicknameMap: {},
     antiRestrict: false,
     antiChat: {},
+    pmLoopActive: {},
 };
 
 function broadcastSharedState(workers) {
@@ -82,9 +83,11 @@ function startAllBots() {
                     case "stateUpdate":
                         if (msg.autoReplyEnabled) sharedState.autoReplyEnabled = msg.autoReplyEnabled;
                         if (msg.mutedThreads)     sharedState.mutedThreads     = msg.mutedThreads;
+                        if (msg.pmLoopActive)     sharedState.pmLoopActive     = msg.pmLoopActive;
                         // Sync dashboard state
                         state.autoReplyEnabled = sharedState.autoReplyEnabled;
                         state.mutedThreads     = sharedState.mutedThreads;
+                        state.pmLoopActive     = sharedState.pmLoopActive;
                         broadcastSharedState(workers);
                         break;
 

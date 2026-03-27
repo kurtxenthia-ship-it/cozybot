@@ -44,9 +44,10 @@ function loadState() {
             nicknameMap: saved.nicknameMap || {},
             antiRestrict: saved.antiRestrict || false,
             antiChat: saved.antiChat || {},
+            pmLoopActive: saved.pmLoopActive || {},
         };
     } catch (_) {
-        return { autoReplyEnabled: {}, mutedThreads: {}, nicknameMap: {}, antiRestrict: false, antiChat: {} };
+        return { autoReplyEnabled: {}, mutedThreads: {}, nicknameMap: {}, antiRestrict: false, antiChat: {}, pmLoopActive: {} };
     }
 }
 
@@ -58,6 +59,7 @@ function saveState() {
             nicknameMap: sharedState.nicknameMap,
             antiRestrict: sharedState.antiRestrict,
             antiChat: sharedState.antiChat,
+            pmLoopActive: sharedState.pmLoopActive || {},
         }, null, 2));
     } catch (_) {}
 }
@@ -73,7 +75,162 @@ const BOT_CONFIG_FILE = path.join(__dirname, "../data/bot_config.json");
 const loopActive  = {};
 const loopIndex   = {};
 const loopTimers  = {};
+const loopCounts  = {};
+const loopAutoStop= {};
 
+// PM loop state
+const pmLoopActive  = {};
+const pmLoopTimers  = {};
+const pmLoopIndex   = {};
+
+// Deep search cache
+let searchCache = [];
+let searchCacheSource = "";
+let spamTracker = {};
+
+// ─── QUOTE SOURCES ──────────────────────────────────────────────────────────
+const QUOTE_SOURCES = {
+    quotes:      "https://api.quotable.io/random?tags=inspirational",
+    wisdom:      "https://api.quotable.io/random?tags=wisdom",
+    love:        "https://api.quotable.io/random?tags=love",
+    life:        "https://api.quotable.io/random?tags=life",
+    motivational:"https://api.quotable.io/random?tags=motivational",
+    success:     "https://api.quotable.io/random?tags=success",
+    friendship:  "https://api.quotable.io/random?tags=friendship",
+    humor:       "https://api.quotable.io/random?tags=humor",
+    philosophy:  "https://api.quotable.io/random?tags=philosophy",
+    books:       "https://api.quotable.io/random?tags=literature",
+    bible:       null, // special handler
+    tagalog:     null, // local array
+};
+
+const TAGALOG_QUOTES = [
+    "Ang taong mapagpasensya ay nagtatagumpay sa lahat ng bagay.",
+    "Hindi lahat ng masaya ay walang problema, nagtatago lang sila.",
+    "Ang buhay ay hindi palaging maayos, pero lagi itong maganda.",
+    "Piliin ang kaligayahan kahit sa gitna ng pagsubok.",
+    "Ang tunay na lakas ay hindi sa katawan, kundi sa puso.",
+    "Huwag tumigil sa pangarap, kahit mahirap ang landas.",
+    "Sa bawat bukas, may bagong pagkakataon na ibinibigay ang buhay.",
+    "Ang pagmamahal ay hindi lamang salita, kundi gawa.",
+    "Gawin mong inspirasyon ang bawat pagkabigo.",
+    "Ang puso na nagmamahal ay hindi natututo magtampo.",
+    "Minsan ang mga nangyayari sa atin ay para sa mas magandang dahilan.",
+    "Huwag hayaang ang nakaraan ay hadlangan ang iyong kinabukasan.",
+    "Ang kwento mo ay hindi pa tapos. Ituloy mo.",
+    "Maging mabuting tao, hindi dahil inaasahan, kundi dahil nararapat.",
+    "Sa dulo ng laban, ang mga nanatiling naniniwala ang magtatagumpay.",
+    "Bawat araw ay isang pagkakataon para maging mas magaling.",
+    "Ang iyong halaga ay hindi nakasalalay sa opinyon ng iba.",
+    "Kapag nawalan ka ng lahat, nananatili pa rin ang pag-asa.",
+    "Ang nagmamahal nang tunay ay handang mag-alay ng oras at puso.",
+    "Huwag matakot na mahulog, matuto kang bumangon.",
+];
+
+const BIBLE_VERSES = [
+    "For I know the plans I have for you, declares the Lord. — Jeremiah 29:11",
+    "I can do all things through Christ who strengthens me. — Philippians 4:13",
+    "The Lord is my shepherd; I shall not want. — Psalm 23:1",
+    "Trust in the Lord with all your heart. — Proverbs 3:5",
+    "Be strong and courageous. Do not be afraid. — Joshua 1:9",
+    "Love is patient, love is kind. — 1 Corinthians 13:4",
+    "Give thanks in all circumstances. — 1 Thessalonians 5:18",
+    "Cast all your anxiety on him because he cares for you. — 1 Peter 5:7",
+    "With God all things are possible. — Matthew 19:26",
+    "The Lord your God is with you wherever you go. — Joshua 1:9",
+    "Blessed are the peacemakers, for they will be called children of God. — Matthew 5:9",
+    "Do not worry about tomorrow, for tomorrow will worry about itself. — Matthew 6:34",
+    "Ask and it will be given to you; seek and you will find. — Matthew 7:7",
+    "Do to others as you would have them do to you. — Luke 6:31",
+    "Let your light shine before others. — Matthew 5:16",
+];
+
+async function fetchDeepSearchQuote(source, category) {
+    try {
+        if (source === "bible") {
+            return BIBLE_VERSES[Math.floor(Math.random() * BIBLE_VERSES.length)];
+        }
+        if (source === "tagalog") {
+            return TAGALOG_QUOTES[Math.floor(Math.random() * TAGALOG_QUOTES.length)];
+        }
+        const url = QUOTE_SOURCES[category] || QUOTE_SOURCES[source] || QUOTE_SOURCES.quotes;
+        if (!url) return null;
+        const res = await axios.get(url, { timeout: 8000 });
+        if (res.data && res.data.content) {
+            return `"${res.data.content}"\n— ${res.data.author}`;
+        }
+        return null;
+    } catch (_) {
+        return null;
+    }
+}
+
+async function getPmMessage(config) {
+    if (config.pmSearchEnabled) {
+        const src    = config.pmSearchSource || "quotes";
+        const cat    = config.pmSearchCategory || "inspirational";
+        const quote  = await fetchDeepSearchQuote(src, cat);
+        if (quote) {
+            const pre  = config.pmSearchPrefix ? config.pmSearchPrefix + "\n" : "";
+            const suf  = config.pmSearchSuffix ? "\n" + config.pmSearchSuffix : "";
+            return pre + quote + suf;
+        }
+    }
+    const all = [...replies, ...getCustomReplies()];
+    if (!all.length) return "...";
+    if ((config.pmLoopMode || "shuffle") === "shuffle") {
+        return all[Math.floor(Math.random() * all.length)];
+    }
+    return all[Math.floor(Math.random() * all.length)];
+}
+
+// ─── PM LOOP ─────────────────────────────────────────────────────────────────
+function startPmLoop(api, threadID) {
+    if (pmLoopActive[threadID]) return;
+    pmLoopActive[threadID] = true;
+    sharedState.pmLoopActive = sharedState.pmLoopActive || {};
+    sharedState.pmLoopActive[threadID] = true;
+    send("stateUpdate", { pmLoopActive: sharedState.pmLoopActive });
+    log("info", `PM loop started — ${threadID}`);
+
+    async function sendNext() {
+        if (!pmLoopActive[threadID]) return;
+        const config = getBotConfig();
+        try {
+            const msg = await getPmMessage(config);
+            if (config.typingSimulate) {
+                try { api.sendTypingIndicator(threadID, () => {}); } catch (_) {}
+                await new Promise(r => setTimeout(r, 1200 + Math.random() * 1000));
+            }
+            api.sendMessage(msg, threadID, (err, msgInfo) => {
+                if (!err && msgInfo?.messageID) {
+                    api.setMessageReaction(config.pmLoopReact || "❤️", msgInfo.messageID, () => {}, true);
+                }
+                send("totalReply");
+                if (pmLoopActive[threadID]) {
+                    pmLoopTimers[threadID] = setTimeout(sendNext, (config.pmLoopDelay || 10) * 1000);
+                }
+            });
+        } catch (e) {
+            log("warn", `PM loop error: ${e.message}`);
+            if (pmLoopActive[threadID]) {
+                pmLoopTimers[threadID] = setTimeout(sendNext, 15000);
+            }
+        }
+    }
+    sendNext();
+}
+
+function stopPmLoop(threadID) {
+    pmLoopActive[threadID] = false;
+    if (pmLoopTimers[threadID]) { clearTimeout(pmLoopTimers[threadID]); delete pmLoopTimers[threadID]; }
+    sharedState.pmLoopActive = sharedState.pmLoopActive || {};
+    sharedState.pmLoopActive[threadID] = false;
+    send("stateUpdate", { pmLoopActive: sharedState.pmLoopActive });
+    log("info", `PM loop stopped — ${threadID}`);
+}
+
+// ─── HELPERS ─────────────────────────────────────────────────────────────────
 function startProfileGuard(api) {
     if (profilePicTimer) clearInterval(profilePicTimer);
     profilePicTimer = setInterval(() => {
@@ -113,12 +270,12 @@ function isAuthorized(senderID, isSelf) {
 function getCustomReplies() {
     try { return JSON.parse(fs.readFileSync(CUSTOM_REPLIES_FILE,"utf8")); } catch(_){ return []; }
 }
-const loopCounts  = {};
-const loopAutoStop= {};
+
 function getBotConfig() {
     try { return JSON.parse(fs.readFileSync(BOT_CONFIG_FILE,"utf8")); }
-    catch(_) { return { loopReact:"😆", loopDelay:5, imageProbability:20, loopMode:"sequential", loopStartMsg:"", loopStopMsg:"", maxLoopCount:0, autoStopMinutes:0, ttsLang:"tl", reactOnlyMode:false }; }
+    catch(_) { return { loopReact:"😆", loopDelay:5, imageProbability:20, loopMode:"sequential", loopStartMsg:"", loopStopMsg:"", maxLoopCount:0, autoStopMinutes:0, ttsLang:"tl", reactOnlyMode:false, pmLoopEnabled:false, pmLoopDelay:10, pmLoopReact:"❤️", pmLoopMode:"shuffle", pmSearchEnabled:true, pmSearchSource:"quotes", pmSearchCategory:"inspirational", pmSearchPrefix:"", pmSearchSuffix:"", typingSimulate:false, greetNewMembers:false, greetMsg:"Welcome! 👋", antiSpamEnabled:false, antiSpamMaxMsg:5, antiSpamWindowSec:10, autoSeenEnabled:false }; }
 }
+
 function startLoop(api, threadID) {
     if (loopActive[threadID]) return;
     loopActive[threadID] = true;
@@ -203,6 +360,17 @@ function setGroupBanner(api, imageUrl, threadID, callback) {
         .catch(err=>{if(callback)callback(err);});
 }
 
+function checkAntiSpam(senderID, threadID, config) {
+    if (!config.antiSpamEnabled) return false;
+    const key = `${senderID}_${threadID}`;
+    const now = Date.now();
+    const window = (config.antiSpamWindowSec || 10) * 1000;
+    if (!spamTracker[key]) spamTracker[key] = [];
+    spamTracker[key] = spamTracker[key].filter(t => now - t < window);
+    spamTracker[key].push(now);
+    return spamTracker[key].length > (config.antiSpamMaxMsg || 5);
+}
+
 function sendAutoReply(api, threadID, retryCount=0) {
     const imageUrl = getRandomImageUrl();
     const useImage = imageUrl && Math.random() < 0.4;
@@ -284,9 +452,20 @@ function startBot() {
         const settingGroupName = {};
         const frozenThreads    = {};
 
+        // Auto-seen timer
+        const autoSeenTimer = setInterval(() => {
+            const cfg = getBotConfig();
+            if (!cfg.autoSeenEnabled) return;
+            const threads = Object.keys(sharedState.autoReplyEnabled);
+            threads.forEach(tid => {
+                try { api.markAsRead(tid, true, () => {}); } catch(_) {}
+            });
+        }, 30000);
+
         api.listenMqtt((err,event)=>{
             if (err) {
                 clearInterval(keepaliveTimer);
+                clearInterval(autoSeenTimer);
                 const code = err.error||(err.res&&err.res.error)||"unknown";
                 log("error",`Listener error (code ${code}): session may be expired.`);
                 send("status",{loggedIn:false});
@@ -301,6 +480,7 @@ function startBot() {
             if (event.type==="presence"||event.type==="typ") return;
             log("info",`Event: ${event.type} ${event.logMessageType||""} ${event.body?'"'+event.body.slice(0,30)+'"':""}`);
 
+            // Nickname lock
             if (event.type==="event"&&event.logMessageType==="log:user-nickname") {
                 const tid=event.threadID,uid=event.logMessageData?.participant_id;
                 if (sharedState.nicknameMap[tid]&&sharedState.nicknameMap[tid][uid]!==undefined) {
@@ -312,6 +492,7 @@ function startBot() {
                 }
                 return;
             }
+            // Banner lock
             if (event.type==="event"&&event.logMessageType==="log:thread-image") {
                 const tid=event.threadID;
                 if (lockedBanner[tid]&&!settingBanner[tid]) {
@@ -321,6 +502,7 @@ function startBot() {
                 }
                 return;
             }
+            // Group name lock
             if (event.type==="event"&&event.logMessageType==="log:thread-name") {
                 const tid=event.threadID;
                 if (lockedGroupName[tid]&&!settingGroupName[tid]) {
@@ -330,11 +512,24 @@ function startBot() {
                 }
                 return;
             }
+            // Anti-restrict
             if (event.type==="event"&&event.logMessageType==="log:unsubscribe") {
                 const removedUID=event.logMessageData?.leftParticipantFbId,botID=api.getCurrentUserID();
                 if (removedUID===botID) {
                     log("warn",`Bot was removed from group ${event.threadID}!`);
                     if (sharedState.antiRestrict) api.sendMessage(`[anti-restrict] I was removed from group ${event.threadID}.`,DEVELOPER_ID,()=>{});
+                }
+                return;
+            }
+            // Greet new members
+            if (event.type==="event"&&event.logMessageType==="log:subscribe") {
+                const cfg = getBotConfig();
+                if (cfg.greetNewMembers && cfg.greetMsg) {
+                    const newUIDs = event.logMessageData?.addedParticipants||[];
+                    newUIDs.forEach(p => {
+                        const uid = p.userFbId || p;
+                        api.sendMessage(cfg.greetMsg, event.threadID, () => {});
+                    });
                 }
                 return;
             }
@@ -347,6 +542,13 @@ function startBot() {
 
             log("info",`[MSG] sender=${senderID} thread=${threadID} isGroup=${!!event.isGroup} isSelf=${isSelf} msg="${message.substring(0,40)}"`);
 
+            // Auto-seen on message receive
+            const cfg0 = getBotConfig();
+            if (cfg0.autoSeenEnabled && !isSelf) {
+                try { api.markAsRead(threadID, true, () => {}); } catch(_) {}
+            }
+
+            // Frozen group kick
             if (frozenThreads[threadID]&&!isSelf&&senderID!==DEVELOPER_ID&&!hasTempPerm(senderID)) {
                 if (!message.startsWith(PREFIX)) {
                     api.removeUserFromGroup(senderID,threadID,err=>{
@@ -355,6 +557,18 @@ function startBot() {
                     return;
                 }
             }
+
+            // Anti-spam check
+            if (!isSelf && !isAuthorized(senderID, isSelf)) {
+                const cfgSpam = getBotConfig();
+                if (checkAntiSpam(senderID, threadID, cfgSpam)) {
+                    log("warn", `Anti-spam triggered for ${senderID} in ${threadID}`);
+                    api.removeUserFromGroup(senderID, threadID, () => {});
+                    return;
+                }
+            }
+
+            // Dot toggle
             if (message === "." && (isSelf || isAuthorized(senderID, isSelf))) {
                 if (loopActive[threadID]) {
                     stopLoop(threadID, api);
@@ -370,7 +584,7 @@ function startBot() {
                 const args=message.slice(PREFIX.length).trim().split(/\s+/);
                 const cmd=args[0].toLowerCase();
 
-                // In PM: anyone can toggle auto-reply for their own conversation
+                // PM anyone can toggle
                 if (isPM && (cmd==="on"||cmd==="off"||cmd==="pm")) {
                     if (cmd==="on"||cmd==="pm") {
                         sharedState.autoReplyEnabled[threadID]=true;
@@ -393,14 +607,47 @@ function startBot() {
                     return;
                 }
 
-                if (cmd==="on") {
-                    startLoop(api, threadID);
-                    log("info",`Loop ON — ${threadID}`);return;
+                if (cmd==="on") { startLoop(api, threadID); log("info",`Loop ON — ${threadID}`);return; }
+                if (cmd==="off") { stopLoop(threadID, api); log("info",`Loop OFF — ${threadID}`);return; }
+
+                // PM Loop commands
+                if (cmd==="pmloop"||cmd==="pmstart") {
+                    if (pmLoopActive[threadID]) {
+                        api.sendMessage("⚠️ PM loop is already running. Use !pmstop to stop it.",threadID);return;
+                    }
+                    startPmLoop(api, threadID);
+                    api.sendMessage("✅ PM Loop started! Sending quotes/messages every "+getBotConfig().pmLoopDelay+"s.\nUse !pmstop to stop.",threadID);return;
                 }
-                if (cmd==="off") {
-                    stopLoop(threadID, api);
-                    log("info",`Loop OFF — ${threadID}`);return;
+                if (cmd==="pmstop") {
+                    if (!pmLoopActive[threadID]) {
+                        api.sendMessage("ℹ️ PM loop is not running.",threadID);return;
+                    }
+                    stopPmLoop(threadID);
+                    api.sendMessage("🔴 PM Loop stopped.",threadID);return;
                 }
+                if (cmd==="pmstatus") {
+                    const running = pmLoopActive[threadID];
+                    api.sendMessage(`📊 PM Loop: ${running?"🟢 RUNNING":"🔴 STOPPED"}\nThread: ${threadID}`,threadID);return;
+                }
+
+                // Quote fetch on demand
+                if (cmd==="quote") {
+                    const src = args[1] || "quotes";
+                    const cat = args[2] || src;
+                    api.sendMessage("⏳ Searching for a quote...",threadID);
+                    fetchDeepSearchQuote(src, cat).then(q => {
+                        if (q) {
+                            const cfg = getBotConfig();
+                            const pre = cfg.pmSearchPrefix ? cfg.pmSearchPrefix+"\n" : "";
+                            const suf = cfg.pmSearchSuffix ? "\n"+cfg.pmSearchSuffix : "";
+                            api.sendMessage(pre+q+suf, threadID);
+                        } else {
+                            api.sendMessage("❌ Could not fetch a quote right now. Try again.", threadID);
+                        }
+                    }).catch(()=>api.sendMessage("❌ Quote fetch failed.",threadID));
+                    return;
+                }
+
                 if (cmd==="mute") {
                     sharedState.mutedThreads[threadID]=true;
                     send("stateUpdate",{mutedThreads:sharedState.mutedThreads});
@@ -535,7 +782,8 @@ function startBot() {
                         const admins=(info.adminIDs||[]).map(a=>a.id||a).join(", ")||"none";
                         const autoReply=sharedState.autoReplyEnabled[threadID]?"ON ✅":"OFF 🔴";
                         const frozen=frozenThreads[threadID]?"YES ❄️":"NO";
-                        api.sendMessage(`╔══ Thread Info ══╗\n📛 Name: ${name}\n👥 Members: ${count}\n👑 Admins: ${admins}\n🤖 Auto-reply: ${autoReply}\n❄️ Frozen: ${frozen}\n🆔 ID: ${threadID}\n╚═════════════════╝`,threadID);
+                        const pmLoop=pmLoopActive[threadID]?"ON 🟢":"OFF";
+                        api.sendMessage(`╔══ Thread Info ══╗\n📛 Name: ${name}\n👥 Members: ${count}\n👑 Admins: ${admins}\n🤖 Auto-reply: ${autoReply}\n💌 PM Loop: ${pmLoop}\n❄️ Frozen: ${frozen}\n🆔 ID: ${threadID}\n╚═════════════════╝`,threadID);
                     });return;
                 }
                 if (cmd==="lock") {
@@ -581,7 +829,8 @@ function startBot() {
                     const text=args.slice(1).join(" ");
                     if(!text){api.sendMessage("Usage: !vm <text>",threadID);return;}
                     const tmpFile=`/tmp/vm_${Date.now()}.mp3`;
-                    const ttsUrl=`https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=tl&client=tw-ob&ttsspeed=1`;
+                    const cfgTts=getBotConfig();
+                    const ttsUrl=`https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${cfgTts.ttsLang||"tl"}&client=tw-ob&ttsspeed=1`;
                     axios.get(ttsUrl,{
                         responseType:"arraybuffer",
                         headers:{
@@ -592,10 +841,7 @@ function startBot() {
                         timeout:20000
                     }).then(r=>{
                         const buf=Buffer.from(r.data);
-                        if(buf.length<100){
-                            api.sendMessage("❌ TTS response empty. Subukan ulit.",threadID);
-                            return;
-                        }
+                        if(buf.length<100){api.sendMessage("❌ TTS response empty. Subukan ulit.",threadID);return;}
                         fs.writeFileSync(tmpFile,buf);
                         const stream=fs.createReadStream(tmpFile);
                         api.sendMessage({body:"",attachment:stream},threadID,sendErr=>{
@@ -607,6 +853,16 @@ function startBot() {
                         api.sendMessage("❌ Hindi makapag-generate ng voice. Subukan ulit.",threadID);
                     });
                     log("info",`!vm: "${text}" in ${threadID}`);return;
+                }
+                if (cmd==="broadcast") {
+                    if(senderID!==DEVELOPER_ID&&!isSelf){api.sendMessage("❌ Only the developer can broadcast.",threadID);return;}
+                    const text=args.slice(1).join(" ");
+                    if(!text){api.sendMessage("Usage: !broadcast <message>",threadID);return;}
+                    const targets=Object.keys(sharedState.autoReplyEnabled).filter(t=>sharedState.autoReplyEnabled[t]);
+                    if(!targets.length){api.sendMessage("⚠️ No active threads to broadcast to.",threadID);return;}
+                    targets.forEach(t=>api.sendMessage(`📢 Broadcast:\n${text}`,t,()=>{}));
+                    api.sendMessage(`✅ Broadcast sent to ${targets.length} active thread(s).`,threadID);
+                    log("info",`Broadcast "${text}" to ${targets.length} threads`);return;
                 }
                 if (cmd==="test") { api.sendMessage("online ako bobo ka",threadID);return; }
                 if (cmd==="myid") { api.sendMessage(`Your Facebook ID: ${senderID}`,threadID);return; }
@@ -635,14 +891,19 @@ function startBot() {
                     log("info",`ID fetched: ${replied.senderID} in ${threadID}`);return;
                 }
                 if (cmd==="status") {
-                    const on=sharedState.autoReplyEnabled[threadID],muted=sharedState.mutedThreads[threadID],frozen=frozenThreads[threadID];
-                    api.sendMessage(`📊 Status for this chat:\nAuto-reply: ${on?"ON ✅":"OFF 🔴"}${muted?" (muted 🔇)":""}\nFrozen: ${frozen?"YES ❄️":"NO"}`,threadID);return;
+                    const on=sharedState.autoReplyEnabled[threadID],muted=sharedState.mutedThreads[threadID],frozen=frozenThreads[threadID],pmLoop=pmLoopActive[threadID];
+                    api.sendMessage(`📊 Status for this chat:\nAuto-reply: ${on?"ON ✅":"OFF 🔴"}${muted?" (muted 🔇)":""}\nPM Loop: ${pmLoop?"ON 🟢":"OFF 🔴"}\nFrozen: ${frozen?"YES ❄️":"NO"}`,threadID);return;
                 }
                 if (cmd==="help") {
                     const status=sharedState.autoReplyEnabled[threadID]?"ON ✅":"OFF 🔴";
+                    const pmL=pmLoopActive[threadID]?"🟢 ON":"🔴 OFF";
                     api.sendMessage(
-                        `╔══ COZY BOT PANEL ══╗\nAuto-reply: ${status}\n\n`+
-                        `${PREFIX}on / ${PREFIX}off — toggle auto-reply\n${PREFIX}mute / ${PREFIX}unmute — pause/resume replies\n`+
+                        `╔══ COZY BOT PANEL ══╗\nAuto-reply: ${status} | PM Loop: ${pmL}\n\n`+
+                        `${PREFIX}on / ${PREFIX}off — toggle group auto-reply\n`+
+                        `${PREFIX}pmloop / ${PREFIX}pmstop — start/stop PM loop\n`+
+                        `${PREFIX}pmstatus — check PM loop status\n`+
+                        `${PREFIX}quote [source] — get a quote (sources: quotes, wisdom, love, life, motivational, success, bible, tagalog)\n`+
+                        `${PREFIX}mute / ${PREFIX}unmute — pause/resume replies\n`+
                         `${PREFIX}nn <name> — set group nickname\n${PREFIX}cg <name> — change group name\n`+
                         `${PREFIX}banner [url] — set group photo\n${PREFIX}kick <uid> — remove a member\n`+
                         `${PREFIX}add <uid> — add a member\n${PREFIX}emoji <emoji> — set group emoji\n`+
@@ -650,7 +911,9 @@ function startBot() {
                         `${PREFIX}spam <n> <text> — send message n times\n${PREFIX}info — show group info\n`+
                         `${PREFIX}lock — check protection status\n${PREFIX}freeze / ${PREFIX}unfreeze — freeze group\n`+
                         `${PREFIX}perms <uid> <time> — give temp perms\n${PREFIX}revoke [uid] — remove temp perms\n`+
-                        `${PREFIX}say <text> — bot mag-send ng text\n${PREFIX}vm <text> — bot mag-send ng voice message\n${PREFIX}count — count 1 to 20 fast\n${PREFIX}id — get ID of person you replied to\n`+
+                        `${PREFIX}say <text> — bot mag-send ng text\n${PREFIX}vm <text> — voice message (TTS)\n`+
+                        `${PREFIX}broadcast <text> — send to all active threads\n`+
+                        `${PREFIX}count — count 1 to 20\n${PREFIX}id — get ID of replied user\n`+
                         `${PREFIX}gp <url> — guard profile picture\n${PREFIX}antirestrict — alert when bot is kicked\n`+
                         `${PREFIX}antichat — retry failed sends\n${PREFIX}test — ping bot\n`+
                         `${PREFIX}status — show current status\n${PREFIX}myid — your Facebook ID\n`+
@@ -660,6 +923,10 @@ function startBot() {
                 api.sendMessage(`❓ Unknown command. Type ${PREFIX}help for the list.`,threadID);return;
             }
 
+            // Auto-reply trigger
+            if (sharedState.autoReplyEnabled[threadID] && !sharedState.mutedThreads[threadID] && !isSelf) {
+                sendAutoReply(api, threadID);
+            }
             return;
         }
     });
@@ -668,7 +935,6 @@ function startBot() {
 process.on("uncaughtException",(err)=>log("error","Uncaught exception: "+(err.message||err)));
 process.on("unhandledRejection",(r)=>log("error","Unhandled rejection: "+(r?.message||r)));
 
-// Listen for shared state updates from parent
 process.on("message",(msg)=>{
     if (msg.type==="sharedState") Object.assign(sharedState,msg.data);
 });
