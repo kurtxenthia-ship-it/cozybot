@@ -499,7 +499,7 @@ function startBot() {
                     if(!text){api.sendMessage("Usage: !vm <text>",threadID);return;}
                     const tmpFile=`/tmp/vm_${Date.now()}.mp3`;
                     try {
-                        const gtts=require("node-gtts")("en");
+                        const gtts=require("node-gtts")("tl");
                         gtts.save(tmpFile,text,function(err){
                             if(err){
                                 log("warn",`!vm gtts save error: ${err.message||err}`);
