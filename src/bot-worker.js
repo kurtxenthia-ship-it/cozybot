@@ -227,11 +227,11 @@ function startBot() {
     catch(e) { log("error","Cannot read fbstate: "+e.message); send("status",{loggedIn:false,reconnecting:false}); return; }
 
     login(appState,{
-        bypassRegion: "ash",
-        online:       false,
-        selfListen:   false,   // ← false: bot does NOT see its own messages (cleaner PM handling)
+        online:       true,
+        selfListen:   false,
         listenEvents: true,
         autoMarkDelivery: false,
+        logLevel:     "silent",
     }, (err, api) => {
         if (err) {
             const msg = err.message||JSON.stringify(err);
@@ -263,7 +263,7 @@ function startBot() {
         api.listenMqtt((err, event) => {
             if (err) {
                 clearInterval(keepalive);
-                stopAllLoops(null);  // ← Stop all loops when connection drops
+                stopAllLoops(null);
                 log("error",`Listener error: ${err.error||err.message||err}. Session may be expired.`);
                 send("status",{loggedIn:false});
                 scheduleReconnect();
