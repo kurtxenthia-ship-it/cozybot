@@ -91,7 +91,7 @@ function getBotConfig() {
 }
 function getCustomReplies()  { try { return JSON.parse(fs.readFileSync(CUSTOM_REPLIES_FILE,"utf8")); } catch(_){return[];} }
 function getImageReplies()   { let c=[]; try{c=JSON.parse(fs.readFileSync(IMAGE_REPLIES_FILE,"utf8"));}catch(_){} return [...builtinImageReplies,...c].filter(u=>u&&u.startsWith("http")); }
-function getAllReplies()      { return [...replies, ...getCustomReplies()]; }
+function getAllReplies()      { return [...replies, ...getCustomReplies()].filter(r=>r&&r.trim()); }
 function getRandomReply()    { const a=getAllReplies(); return a.length?a[Math.floor(Math.random()*a.length)]:"..."; }
 function getRandomImageUrl() { const i=getImageReplies(); return i.length?i[Math.floor(Math.random()*i.length)]:null; }
 
