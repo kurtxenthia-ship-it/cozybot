@@ -97,17 +97,25 @@ function buildHTML(tab) {
     const customReplies = readCustomReplies();
     const imageReplies  = readImageReplies();
 
+    const SVG_ICONS = {
+        dashboard: `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>`,
+        loop:      `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>`,
+        config:    `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`,
+        session:   `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>`,
+        commands:  `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`,
+    };
+
     const TABS = [
-        {id:"dashboard",icon:"🏠",label:"Dashboard"},
-        {id:"loop",     icon:"🔄",label:"Loop Queue"},
-        {id:"config",   icon:"⚙️", label:"Config"},
-        {id:"session",  icon:"🔑",label:"Session"},
-        {id:"commands", icon:"📟",label:"Commands"},
+        {id:"dashboard",label:"Dashboard"},
+        {id:"loop",     label:"Loop Queue"},
+        {id:"config",   label:"Config"},
+        {id:"session",  label:"Session"},
+        {id:"commands", label:"Commands"},
     ];
 
     const navLinks = TABS.map(tb=>`
         <a href="/?tab=${tb.id}" class="nav-item ${t===tb.id?"active":""}">
-            <span class="nav-icon">${tb.icon}</span>
+            <span class="nav-icon">${SVG_ICONS[tb.id]||""}</span>
             <span class="nav-label">${tb.label}</span>
         </a>`).join("");
 
@@ -132,9 +140,9 @@ function buildHTML(tab) {
     const pageDashboard = `
         <div class="hero">
             <div class="hero-top">
-                <div class="hero-icon">🤖</div>
+                <div class="hero-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a2 2 0 0 1 2 2v1h1a3 3 0 0 1 3 3v1a2 2 0 0 1 0 4v1a3 3 0 0 1-3 3h-1v1a2 2 0 0 1-4 0v-1H9a3 3 0 0 1-3-3v-1a2 2 0 0 1 0-4V8a3 3 0 0 1 3-3h1V4a2 2 0 0 1 2-2z"/><circle cx="9" cy="11" r="1" fill="currentColor"/><circle cx="15" cy="11" r="1" fill="currentColor"/></svg></div>
                 <div>
-                    <div class="hero-title">Messenger Bot</div>
+                    <div class="hero-title">Cozy Bot Panel</div>
                     <div class="hero-sub">loop (dot) · auto-respond (!on/!off) · group tools · tts</div>
                 </div>
                 <div class="status-badge" style="--sc:${statusDot}">
@@ -149,7 +157,7 @@ function buildHTML(tab) {
             <div class="card"><div class="ct cp"></div><div class="clabel">Auto-Respond</div><div class="cval" style="color:#c084fc">${arCount}</div><div class="csub">${mutedCount} muted · groups only</div></div>
             <div class="card"><div class="ct ca"></div><div class="clabel">Uptime</div><div class="cval" style="color:#fbbf24;font-size:${getUptime().length>6?"18":"26"}px;padding-top:4px">${getUptime()}</div><div class="csub">since boot</div></div>
         </div>
-        <div class="section-label">📡 Thread Registry</div>
+        <div class="section-label">Thread Registry</div>
         <div class="panel">
             <div class="ph"><span class="pbadge pbadge-g">LIVE</span><span class="ph-title">Active Threads</span><span class="ph-meta">${uniqueThreads.length} total</span></div>
             <table>
@@ -170,7 +178,7 @@ function buildHTML(tab) {
                 }</tbody>
             </table>
         </div>
-        <div class="section-label">📡 Live Logs</div>
+        <div class="section-label">Live Logs</div>
         <div class="panel" style="padding:0">
             <div class="ph"><span class="pbadge">LOGS</span><span class="ph-title">Real-time Events</span><span class="ph-meta">${logs.length} entries</span></div>
             <div class="log-wrap">${logRows}</div>
@@ -204,9 +212,9 @@ function buildHTML(tab) {
     const pageLoop = `
         <div class="two-col">
             <div>
-                <div class="section-label">💬 Text Message Pool</div>
+                <div class="section-label">Text Message Pool</div>
                 <div class="panel">
-                    <div class="ph"><span class="pbadge">QUEUE</span><span class="ph-title">Custom Text Replies</span><span class="ph-meta" style="color:#7b8ff7">${customReplies.length} custom · ${customReplies.length+102} total</span></div>
+                    <div class="ph"><span class="pbadge">QUEUE</span><span class="ph-title">Custom Text Replies</span><span class="ph-meta" style="color:var(--ac2)">${customReplies.length} custom · ${customReplies.length+102} total</span></div>
                     <form class="irow" method="POST" action="/api/replies/add?tab=loop">
                         <input class="ifield" type="text" name="word" placeholder="Add new message to loop pool…" autocomplete="off" required/>
                         <button class="btn-add" type="submit">＋ Add</button>
@@ -215,9 +223,9 @@ function buildHTML(tab) {
                 </div>
             </div>
             <div>
-                <div class="section-label">🖼 Image URL Pool</div>
+                <div class="section-label">Image URL Pool</div>
                 <div class="panel">
-                    <div class="ph"><span class="pbadge pbadge-p">IMAGES</span><span class="ph-title">Custom Image URLs</span><span class="ph-meta" style="color:#c084fc">${imageReplies.length} URLs</span></div>
+                    <div class="ph"><span class="pbadge pbadge-p">IMAGES</span><span class="ph-title">Custom Image URLs</span><span class="ph-meta" style="color:var(--pu2)">${imageReplies.length} URLs</span></div>
                     <form class="irow" method="POST" action="/api/images/add?tab=loop">
                         <input class="ifield" type="url" name="url" placeholder="https://example.com/image.jpg" autocomplete="off" required/>
                         <button class="btn-add" type="submit">＋ Add</button>
@@ -232,7 +240,7 @@ function buildHTML(tab) {
         <form method="POST" action="/api/config/save?tab=config">
         <div class="two-col">
             <div>
-                <div class="section-label">🔄 Loop Engine</div>
+                <div class="section-label">Loop Engine</div>
                 <div class="panel">
                     <div class="ph"><span class="pbadge">LOOP</span><span class="ph-title">Dot Trigger Settings</span></div>
                     <div class="cfg-body">
@@ -254,7 +262,7 @@ function buildHTML(tab) {
                 </div>
             </div>
             <div>
-                <div class="section-label">🛡️ General Settings</div>
+                <div class="section-label">General Settings</div>
                 <div class="panel">
                     <div class="ph"><span class="pbadge pbadge-g">GENERAL</span><span class="ph-title">Bot Behavior</span></div>
                     <div class="cfg-body">
@@ -291,7 +299,7 @@ function buildHTML(tab) {
     const pageSession = `
         <div class="two-col">
             <div>
-                <div class="section-label">🤖 Bot Status</div>
+                <div class="section-label">Bot Status</div>
                 <div class="panel">
                     <div class="ph"><span class="pbadge">ACCOUNTS</span><span class="ph-title">Logged-in Bots</span></div>
                     <div style="padding:16px;display:flex;flex-direction:column;gap:10px">${botStatusCards}</div>
@@ -307,7 +315,7 @@ function buildHTML(tab) {
                 </div>
             </div>
             <div>
-                <div class="section-label">🔑 Paste New Cookie</div>
+                <div class="section-label">Paste New Cookie</div>
                 <div class="panel">
                     <div class="ph"><span class="pbadge pbadge-g">UPDATE</span><span class="ph-title">Update fbstate.json</span></div>
                     <div style="padding:16px">
@@ -394,6 +402,18 @@ function buildHTML(tab) {
             ["!test","Ping the bot"],
             ["!help","Show the full command list inside Messenger"],
         ]},
+        {sec:"Fun / Unexpected",rows:[
+            ["!flip","Flip a coin — heads or tails"],
+            ["!roll [sides]","Roll a dice, default 6-sided"],
+            ["!8ball &lt;question&gt;","Ask the magic 8 ball"],
+            ["!pick a | b | c","Randomly pick one option from a list"],
+            ["!reverse &lt;text&gt;","Send text backwards"],
+            ["!shout &lt;text&gt;","LOUD spaced-out ALL CAPS"],
+            ["!mock &lt;text&gt;","aLtErNaTiNg cAsE (spongebob mode)"],
+            ["!clap &lt;text&gt;","Put claps between each word"],
+            ["!timer &lt;sec&gt;","Set a countdown — bot pings when done"],
+            ["!repeat &lt;n&gt; &lt;text&gt;","Send a message stacked n times (max 10)"],
+        ]},
     ];
 
     const cmdSections = CMDS.map(sec=>`
@@ -406,7 +426,7 @@ function buildHTML(tab) {
         </div>`).join("");
 
     const pageCommands = `
-        <div class="section-label">📟 Command Reference</div>
+        <div class="section-label">Command Reference</div>
         ${cmdSections}
         <div class="notice-box" style="margin-top:0">
             <div class="nb-title">Trigger Summary</div>
@@ -426,19 +446,19 @@ function buildHTML(tab) {
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>CZB Panel${t!=="dashboard"?" · "+t.charAt(0).toUpperCase()+t.slice(1):""}</title>
+<title>Cozy Bot Panel${t!=="dashboard"?" · "+t.charAt(0).toUpperCase()+t.slice(1):""}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#080a12;--s0:#0d1020;--s1:#111526;--s2:#161b2e;--s3:#1d2238;
-  --b0:#1e2440;--b1:#2a3158;--b2:#3d4870;
-  --tx:#dde3f5;--tx2:#8b95c0;--tx3:#555e85;--muted:#3a4260;
-  --ac:#5b6ef5;--ac2:#7b8ff7;
-  --acg:linear-gradient(135deg,#4a5be0,#5b6ef5,#7b8ff7);
+  --bg:#0c0a0f;--s0:#110e16;--s1:#17131f;--s2:#1e1829;--s3:#261e34;
+  --b0:#2e2340;--b1:#3d3057;--b2:#52406e;
+  --tx:#ede5f8;--tx2:#a890d0;--tx3:#6e5a94;--muted:#4a3868;
+  --ac:#c084fc;--ac2:#d8a8ff;
+  --acg:linear-gradient(135deg,#9333ea,#c084fc,#e0b8ff);
   --gn:#10b981;--gn2:#34d399;
-  --rd:#ef4444;--rd2:#f87171;
+  --rd:#f43f5e;--rd2:#fb7185;
   --yw:#f59e0b;--yw2:#fbbf24;
   --pu:#a855f7;--pu2:#c084fc;
   --mono:'JetBrains Mono',monospace;
@@ -633,8 +653,8 @@ ${t==="dashboard"?`<meta http-equiv="refresh" content="10"/>`:""}
 <div class="topbar">
   <div class="tb-l">
     <div class="logo">
-      <div class="logo-sq">C</div>
-      CZB<span style="opacity:.3;margin:0 2px">::</span>panel
+      <div class="logo-sq"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a2 2 0 0 1 2 2v1h1a3 3 0 0 1 3 3v1a2 2 0 0 1 0 4v1a3 3 0 0 1-3 3h-1v1a2 2 0 0 1-4 0v-1H9a3 3 0 0 1-3-3v-1a2 2 0 0 1 0-4V8a3 3 0 0 1 3-3h1V4a2 2 0 0 1 2-2z"/><circle cx="9" cy="11" r="1" fill="#fff"/><circle cx="15" cy="11" r="1" fill="#fff"/></svg></div>
+      Cozy Bot
     </div>
     <span class="ver-tag">v2.1</span>
   </div>

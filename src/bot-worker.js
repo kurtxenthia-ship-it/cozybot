@@ -330,14 +330,23 @@ function startBot() {
                 }
                 return;
             }
-            if (event.type!=="message") return;
+            // Accept both "message" and "message_reply" — ws3-fca can emit PM messages
+            // as either type depending on MQTT routing; filtering only "message" causes
+            // the dot trigger to silently miss reply-typed PM events.
+            if (event.type !== "message" && event.type !== "message_reply") return;
 
-            const {threadID, senderID, body, messageID} = event;
+            const threadID  = event.threadID;
+            const senderID  = event.senderID;
+            const messageID = event.messageID;
+            // message_reply has body at event.body just like message does
+            const body    = event.body || "";
+            // isGroup: ws3-fca sets this via !!threadKey.threadFbId
+            // For PMs, threadFbId is null → isGroup = false → isPM = true
             const isGroup = !!event.isGroup;
             const isPM    = !isGroup;
-            const message = (body||"").trim();
+            const message = body.trim();
 
-            log("info",`MSG from=${senderID} group=${isGroup} pm=${isPM} body="${message.slice(0,40)}"`);
+            log("info",`MSG type=${event.type} from=${senderID} group=${isGroup} pm=${isPM} body="${message.slice(0,40)}"`);
 
             // Auto-seen
             const cfg0 = getBotConfig();
@@ -589,8 +598,72 @@ function startBot() {
                     `📊 Bot Status:\n🔄 Loop (dot): ${loop}\n💬 Auto-respond (!on/!off): ${ar}${muted?" 🔇 muted":""}\n❄️ Frozen: ${frozenThreads[threadID]?"YES ❄️":"NO"}\n🆔 Thread: ${threadID}`,
                     threadID,()=>{});return;
             }
-            if (cmd==="test")  { api.sendMessage("✅ Online ka diyan?",threadID,()=>{}); return; }
+            if (cmd==="test")  { api.sendMessage("pong. still alive.",threadID,()=>{}); return; }
             if (cmd==="myid")  { api.sendMessage(`Your ID: ${senderID}`,threadID,()=>{}); return; }
+
+            // ── !flip — coin flip
+            if (cmd==="flip") {
+                const result = Math.random()<0.5?"HEADS":"TAILS";
+                api.sendMessage(`coin: ${result}`,threadID,()=>{});return;
+            }
+            // ── !roll [sides] — dice roll
+            if (cmd==="roll") {
+                const sides=Math.max(2,Math.min(1000,parseInt(args[1])||6));
+                const roll=Math.floor(Math.random()*sides)+1;
+                api.sendMessage(`rolled a d${sides}: ${roll}`,threadID,()=>{});return;
+            }
+            // ── !8ball <question> — magic 8 ball
+            if (cmd==="8ball") {
+                const ANSWERS=["It is certain.","It is decidedly so.","Without a doubt.","Yes, definitely.","You may rely on it.","As I see it, yes.","Most likely.","Outlook good.","Signs point to yes.","Yes.","Reply hazy, try again.","Ask again later.","Better not tell you now.","Cannot predict now.","Concentrate and ask again.","Don't count on it.","My reply is no.","My sources say no.","Outlook not so good.","Very doubtful."];
+                api.sendMessage(ANSWERS[Math.floor(Math.random()*ANSWERS.length)],threadID,()=>{});return;
+            }
+            // ── !pick <a> | <b> | <c> — random picker
+            if (cmd==="pick") {
+                const raw=args.slice(1).join(" ");
+                if(!raw){api.sendMessage("Usage: !pick option1 | option2 | option3",threadID,()=>{});return;}
+                const opts=raw.split("|").map(s=>s.trim()).filter(Boolean);
+                if(opts.length<2){api.sendMessage("Usage: !pick option1 | option2 | option3",threadID,()=>{});return;}
+                api.sendMessage(opts[Math.floor(Math.random()*opts.length)],threadID,()=>{});return;
+            }
+            // ── !reverse <text> — reverse the text
+            if (cmd==="reverse") {
+                const txt=args.slice(1).join(" ");
+                if(!txt){api.sendMessage("Usage: !reverse <text>",threadID,()=>{});return;}
+                api.sendMessage([...txt].reverse().join(""),threadID,()=>{});return;
+            }
+            // ── !shout <text> — ALL CAPS with emphasis
+            if (cmd==="shout") {
+                const txt=args.slice(1).join(" ");
+                if(!txt){api.sendMessage("Usage: !shout <text>",threadID,()=>{});return;}
+                api.sendMessage(txt.toUpperCase().split("").join(" ")+"!",threadID,()=>{});return;
+            }
+            // ── !clap <text> — clap between words
+            if (cmd==="clap") {
+                const txt=args.slice(1).join(" ");
+                if(!txt){api.sendMessage("Usage: !clap <text>",threadID,()=>{});return;}
+                api.sendMessage(txt.split(" ").join(" 👏 ")+" 👏",threadID,()=>{});return;
+            }
+            // ── !mock <text> — alternating case (mocking spongebob style)
+            if (cmd==="mock") {
+                const txt=args.slice(1).join(" ");
+                if(!txt){api.sendMessage("Usage: !mock <text>",threadID,()=>{});return;}
+                const mocked=[...txt].map((c,i)=>i%2===0?c.toLowerCase():c.toUpperCase()).join("");
+                api.sendMessage(mocked,threadID,()=>{});return;
+            }
+            // ── !timer <seconds> — countdown ping after N seconds
+            if (cmd==="timer") {
+                const sec=Math.max(1,Math.min(300,parseInt(args[1])||0));
+                if(!sec){api.sendMessage("Usage: !timer <1-300>",threadID,()=>{});return;}
+                api.sendMessage(`Timer set for ${sec}s.`,threadID,()=>{});
+                setTimeout(()=>api.sendMessage(`Time's up! (${sec}s)`,threadID,()=>{}),sec*1000);return;
+            }
+            // ── !repeat <n> <text> — repeat text n times fast (different from !spam — no delay)
+            if (cmd==="repeat") {
+                const n=parseInt(args[1]),txt=args.slice(2).join(" ");
+                if(!n||!txt||n<1||n>10){api.sendMessage("Usage: !repeat <1-10> <text>",threadID,()=>{});return;}
+                api.sendMessage(Array(n).fill(txt).join("\n"),threadID,()=>{});return;
+            }
+
             if (cmd==="help") {
                 api.sendMessage(
                     `╔══ COZY BOT COMMANDS ══╗\n`+
@@ -615,10 +688,15 @@ function startBot() {
                     `!seen / !count / !id / !info\n`+
                     `!lock / !status / !gp\n`+
                     `!test / !myid\n`+
+                    `\n— FUN —\n`+
+                    `!flip / !roll [sides]\n`+
+                    `!8ball <q> / !pick a|b|c\n`+
+                    `!reverse / !shout / !mock\n`+
+                    `!clap / !timer <sec> / !repeat <n> <text>\n`+
                     `╚══════════════════════╝`,
                     threadID,()=>{});return;
             }
-            api.sendMessage(`❓ Unknown: !${cmd}. Send !help for the list.`,threadID,()=>{});
+            api.sendMessage(`Unknown: !${cmd}. Send !help for list.`,threadID,()=>{});
         }
     });
 }
