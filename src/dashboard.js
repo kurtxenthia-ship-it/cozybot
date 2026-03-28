@@ -5,15 +5,18 @@ const fs   = require("fs");
 const path = require("path");
 
 const CUSTOM_REPLIES_FILE = path.join(__dirname, "../data/custom_replies.json");
+const IMAGE_REPLIES_FILE  = path.join(__dirname, "../data/image_replies.json");
 const BOT_CONFIG_FILE     = path.join(__dirname, "../data/bot_config.json");
+const FBSTATE_FILE        = path.join(__dirname, "../data/fbstate.json");
 const MAX_LOGS = 200;
 const logs = [];
+
 const state = {
     bots: [],
     developerID: "",
-    autoReplyEnabled: {},
+    loopEnabled: {},
+    autoRespondEnabled: {},
     mutedThreads: {},
-    pmLoopActive: {},
     totalRepliesSent: 0,
     nicknameMap: {},
     startedAt: new Date(),
@@ -31,920 +34,799 @@ function addLog(type, message) {
 
 function getUptime() {
     const ms = Date.now() - state.startedAt.getTime();
-    const s = Math.floor(ms/1000), m = Math.floor(s/60), h = Math.floor(m/60), d = Math.floor(h/24);
-    if (d>0) return `${d}d ${h%24}h`;
-    if (h>0) return `${h}h ${m%60}m`;
-    if (m>0) return `${m}m ${s%60}s`;
-    return `${s}s`;
+    const s=Math.floor(ms/1000), m=Math.floor(s/60), h=Math.floor(m/60), d=Math.floor(h/24);
+    if(d>0)return`${d}d ${h%24}h`;
+    if(h>0)return`${h}h ${m%60}m`;
+    if(m>0)return`${m}m ${s%60}s`;
+    return`${s}s`;
 }
 
 function esc(str) {
     return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
-function readCustomReplies() {
-    try { return JSON.parse(fs.readFileSync(CUSTOM_REPLIES_FILE,"utf8")); } catch(_){ return []; }
-}
-function writeCustomReplies(arr) {
-    fs.writeFileSync(CUSTOM_REPLIES_FILE, JSON.stringify(arr, null, 2), "utf8");
-}
+function readCustomReplies() { try{return JSON.parse(fs.readFileSync(CUSTOM_REPLIES_FILE,"utf8"));}catch(_){return[];} }
+function writeCustomReplies(a){ fs.writeFileSync(CUSTOM_REPLIES_FILE,JSON.stringify(a,null,2),"utf8"); }
+function readImageReplies() { try{return JSON.parse(fs.readFileSync(IMAGE_REPLIES_FILE,"utf8"));}catch(_){return[];} }
+function writeImageReplies(a){ fs.writeFileSync(IMAGE_REPLIES_FILE,JSON.stringify(a,null,2),"utf8"); }
 function readBotConfig() {
-    try { return JSON.parse(fs.readFileSync(BOT_CONFIG_FILE,"utf8")); }
-    catch(_) { return { loopReact:"😆", loopDelay:5, imageProbability:20 }; }
+    try{return JSON.parse(fs.readFileSync(BOT_CONFIG_FILE,"utf8"));}
+    catch(_){return{loopReact:"😆",loopDelay:5,imageProbability:20,loopMode:"sequential",loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,greetMsg:"Welcome! 👋",antiSpamEnabled:false,antiSpamMaxMsg:5,antiSpamWindowSec:10,autoSeenEnabled:false,typingSimulate:false};}
 }
-function writeBotConfig(cfg) {
-    fs.writeFileSync(BOT_CONFIG_FILE, JSON.stringify(cfg, null, 2), "utf8");
-}
+function writeBotConfig(c){ fs.writeFileSync(BOT_CONFIG_FILE,JSON.stringify(c,null,2),"utf8"); }
 
 function buildHTML() {
-    const threads     = Object.keys(state.autoReplyEnabled);
-    const activeCount = threads.filter(t=>state.autoReplyEnabled[t]).length;
-    const offCount    = threads.length - activeCount;
-    const mutedCount  = Object.values(state.mutedThreads||{}).filter(Boolean).length;
-    const pmLoopCount = Object.values(state.pmLoopActive||{}).filter(Boolean).length;
-    const isOnline    = state.loggedIn;
-    const isRecon     = state.reconnecting;
-    const statusText  = isOnline ? "Online" : (isRecon ? "Reconnecting…" : "Offline");
-    const statusColor = isOnline ? "#22c55e" : (isRecon ? "#f59e0b" : "#ef4444");
+    const threads      = Object.keys({...state.loopEnabled,...state.autoRespondEnabled});
+    const uniqueThreads= [...new Set(threads)];
+    const loopCount    = Object.values(state.loopEnabled||{}).filter(Boolean).length;
+    const arCount      = Object.values(state.autoRespondEnabled||{}).filter(Boolean).length;
+    const mutedCount   = Object.values(state.mutedThreads||{}).filter(Boolean).length;
+    const isOnline     = state.loggedIn;
+    const isRecon      = state.reconnecting;
+    const statusColor  = isOnline?"#22c55e":(isRecon?"#f59e0b":"#ef4444");
+    const statusText   = isOnline?"Online":(isRecon?"Reconnecting…":"Offline");
 
-    const customReplies = readCustomReplies();
-    const botConfig     = readBotConfig();
+    const cfg          = readBotConfig();
+    const customReplies= readCustomReplies();
+    const imageReplies = readImageReplies();
 
-    const botBadges = state.bots.length === 0
-        ? `<div class="bot-pill bot-offline"><span class="pill-dot"></span><span class="pill-name">No bots loaded</span></div>`
-        : state.bots.map(b => {
-            const bc = b.loggedIn ? "#22c55e" : (b.reconnecting ? "#f59e0b" : "#ef4444");
-            const bt = b.loggedIn ? "Online" : (b.reconnecting ? `Reconnecting ${b.nextReconnectIn}s` : "Offline");
-            const cls = b.loggedIn ? "bot-online" : (b.reconnecting ? "bot-warn" : "bot-offline");
-            return `<div class="bot-pill ${cls}"><span class="pill-dot"></span><span class="pill-name">${esc(b.label)}</span><span class="pill-status">${bt}</span></div>`;
+    // Bot pills
+    const botBadges = state.bots.length===0
+        ? `<div class="bot-pill bot-off"><span class="bdot"></span><span>No bots loaded</span></div>`
+        : state.bots.map(b=>{
+            const cls=b.loggedIn?"bot-on":(b.reconnecting?"bot-warn":"bot-off");
+            const lbl=b.loggedIn?"Online":(b.reconnecting?`Reconnecting ${b.nextReconnectIn}s`:"Offline");
+            return `<div class="bot-pill ${cls}"><span class="bdot"></span><b>${esc(b.label)}</b><span class="bsub">${lbl}</span></div>`;
         }).join("");
 
-    const threadRows = threads.length === 0
-        ? `<tr><td colspan="4" class="empty-cell">No threads yet — send <code>!on</code> in Messenger</td></tr>`
-        : threads.map(tid => {
-            const on    = state.autoReplyEnabled[tid];
-            const muted = state.mutedThreads&&state.mutedThreads[tid];
-            const pmL   = state.pmLoopActive&&state.pmLoopActive[tid];
-            const label = on ? (muted ? "muted" : "active") : "idle";
-            const cls   = on ? (muted ? "badge-warn" : "badge-green") : "badge-red";
-            const pmBadge = pmL ? `<span class="badge badge-purple">pm-loop</span>` : "";
+    // Thread rows
+    const threadRows = uniqueThreads.length===0
+        ? `<tr><td colspan="4" class="td-empty">No threads yet — send <code>.</code> (dot) in Messenger to start the loop</td></tr>`
+        : uniqueThreads.map(tid=>{
+            const loop = state.loopEnabled&&state.loopEnabled[tid];
+            const ar   = state.autoRespondEnabled&&state.autoRespondEnabled[tid];
+            const muted= state.mutedThreads&&state.mutedThreads[tid];
             return `<tr>
               <td class="td-mono">${esc(tid)}</td>
-              <td><span class="badge ${cls}">${label}</span> ${pmBadge}</td>
-              <td class="td-center">${on?"<span class='dot-green'></span>":"<span class='dot-red'></span>"}</td>
-              <td class="td-center">${muted?"<span class='dot-yellow'></span>":"—"}</td>
+              <td>${loop?`<span class="badge bg">🔄 Loop ON</span>`:`<span class="badge br">Loop OFF</span>`}</td>
+              <td>${ar?`<span class="badge bg">💬 Respond ON</span>`:`<span class="badge br">Respond OFF</span>`} ${muted?`<span class="badge by">🔇</span>`:""}</td>
             </tr>`;
         }).join("");
 
-    const logRows = logs.length === 0
-        ? `<div class="log-row log-idle"><span class="log-time">--:--:--</span><span class="log-lvl">IDLE</span><span class="log-msg">Waiting for events…</span></div>`
-        : logs.map(l => {
-            const lv = {error:"ERR",warn:"WARN",reply:"SEND",info:"INFO"}[l.type]||"INFO";
-            return `<div class="log-row log-${l.type}"><span class="log-time">${esc(l.time)}</span><span class="log-lvl">${lv}</span><span class="log-msg">${esc(l.message)}</span></div>`;
+    // Logs
+    const logRows = logs.length===0
+        ? `<div class="lrow lidle"><span class="ltime">--:--</span><span class="llvl">IDLE</span><span class="lmsg">Waiting for events…</span></div>`
+        : logs.slice(0,80).map(l=>{
+            const lv={error:"ERR",warn:"WARN",reply:"SEND",info:"INFO"}[l.type]||"INFO";
+            return `<div class="lrow l${l.type}"><span class="ltime">${esc(l.time)}</span><span class="llvl">${lv}</span><span class="lmsg">${esc(l.message)}</span></div>`;
         }).join("");
 
-    const customWordRows = customReplies.length === 0
-        ? `<div class="empty-queue">Queue is empty — add your first message above</div>`
-        : customReplies.map((w,i) =>
-            `<div class="queue-item">
-                <span class="queue-num">${String(i+1).padStart(2,"0")}</span>
-                <span class="queue-text">${esc(w)}</span>
+    // Custom text replies list
+    const textQueueRows = customReplies.length===0
+        ? `<div class="empty-q">Queue empty — add your first message above</div>`
+        : customReplies.map((w,i)=>
+            `<div class="qi">
+                <span class="qi-n">${String(i+1).padStart(2,"0")}</span>
+                <span class="qi-v">${esc(w)}</span>
                 <form method="POST" action="/api/replies/remove" style="margin:0">
                     <input type="hidden" name="index" value="${i}"/>
-                    <button class="btn-danger-sm" type="submit">✕ remove</button>
+                    <button class="btn-rm" type="submit">✕</button>
                 </form>
-            </div>`
-        ).join("");
+            </div>`).join("");
 
-    const COMMANDS = [
-        ["!on / !off",                "Toggle group auto-reply loop"],
-        ["!pmloop / !pmstop",         "Start / stop PM loop with deep search quotes"],
-        ["!pmstatus",                 "Check PM loop status for this chat"],
-        ["!quote [source]",           "Fetch a quote (sources: quotes, wisdom, love, life, motivational, success, bible, tagalog)"],
-        ["!mute / !unmute",           "Pause or resume auto-reply"],
-        ["!say &lt;text&gt;",         "Bot sends a text message"],
-        ["!vm &lt;text&gt;",          "Bot sends a voice message (TTS)"],
-        ["!broadcast &lt;text&gt;",   "Send to all active threads"],
-        ["!nn &lt;name&gt;",          "Set nickname for all members + lock"],
-        ["!cg &lt;name&gt;",          "Change group name + lock it"],
-        ["!banner [url]",             "Set group photo + protect it"],
-        ["!kick &lt;uid&gt;",         "Kick a member from the group"],
-        ["!add &lt;uid&gt;",          "Add a member to the group"],
-        ["!emoji &lt;emoji&gt;",      "Change group emoji"],
-        ["!color &lt;name&gt;",       "Change chat color theme"],
-        ["!seen",                     "Mark all messages as read"],
-        ["!spam &lt;n&gt; &lt;msg&gt;","Spam a message n times (max 20)"],
-        ["!info",                     "Show group info, members, admins, ID"],
-        ["!lock",                     "Show all active protections"],
-        ["!freeze / !unfreeze",       "Freeze group — anyone who chats gets kicked"],
-        ["!perms &lt;uid&gt; &lt;t&gt;","Grant temp permissions (5min, 1h)"],
-        ["!revoke [uid]",             "Revoke temporary permissions"],
-        ["!gp &lt;url&gt;",           "Guard profile pic — auto-restore every 5min"],
-        ["!gp off",                   "Disable profile guard"],
-        ["!antirestrict",             "Alert dev when bot is kicked"],
-        ["!antichat",                 "Auto-retry failed sends"],
-        ["!count",                    "Count 1 to 20 in chat"],
-        ["!id",                       "Get FB ID of replied-to user"],
-        ["!test",                     "Ping the bot"],
-        ["!status",                   "Show auto-reply + PM loop + freeze status"],
-        ["!myid",                     "Show your own Facebook ID"],
-        ["!help",                     "Show full command list in Messenger"],
+    // Image URL list
+    const imgRows = imageReplies.length===0
+        ? `<div class="empty-q">No custom image URLs — add one above</div>`
+        : imageReplies.map((u,i)=>
+            `<div class="qi">
+                <span class="qi-n">${String(i+1).padStart(2,"0")}</span>
+                <span class="qi-v" style="color:var(--blue2);font-size:11px">${esc(u)}</span>
+                <form method="POST" action="/api/images/remove" style="margin:0">
+                    <input type="hidden" name="index" value="${i}"/>
+                    <button class="btn-rm" type="submit">✕</button>
+                </form>
+            </div>`).join("");
+
+    const CMDS = [
+        [". (dot)","Toggle loop ON/OFF — works in both groups AND PMs"],
+        ["!on","Enable auto-respond (groups only) — replies to every message"],
+        ["!off","Disable auto-respond (groups only)"],
+        ["!mute / !unmute","Pause / resume auto-respond"],
+        ["!nn &lt;name&gt;","Set nickname for all members + lock it"],
+        ["!cg &lt;name&gt;","Change group name + lock it"],
+        ["!banner [url]","Set group photo + protect it"],
+        ["!kick &lt;uid&gt;","Kick a member"],
+        ["!add &lt;uid&gt;","Add a member"],
+        ["!emoji &lt;emoji&gt;","Change group emoji"],
+        ["!color &lt;name&gt;","Change chat color"],
+        ["!seen","Mark all messages as read"],
+        ["!spam &lt;n&gt; &lt;msg&gt;","Send message n times (max 20)"],
+        ["!broadcast &lt;text&gt;","Send to all auto-respond threads"],
+        ["!say &lt;text&gt;","Bot sends a message"],
+        ["!vm &lt;text&gt;","Voice message (TTS)"],
+        ["!info","Group info — name, members, admins, IDs"],
+        ["!lock","Show active protections"],
+        ["!freeze / !unfreeze","Freeze group — chatters get kicked"],
+        ["!perms &lt;uid&gt; &lt;t&gt;","Temp permissions (e.g. 5min, 1h)"],
+        ["!revoke [uid]","Remove temp permissions"],
+        ["!gp &lt;url&gt; / !gp off","Profile pic guard — restores every 5min"],
+        ["!antirestrict","Alert when bot is kicked"],
+        ["!antichat","Auto-retry failed sends"],
+        ["!count","Count 1 to 20 in chat"],
+        ["!id","Get Facebook ID of replied user"],
+        ["!status","Show loop + auto-respond status"],
+        ["!test","Ping bot"],
+        ["!myid","Your Facebook ID"],
+        ["!help","Show full command list in Messenger"],
     ];
 
-    const cmdRows = COMMANDS.map(([cmd,desc])=>
-        `<tr><td class="cmd-name">${cmd}</td><td class="cmd-desc">${desc}</td></tr>`
-    ).join("");
-
-    const QUOTE_SOURCES = ["quotes","wisdom","love","life","motivational","success","friendship","humor","philosophy","books","bible","tagalog"];
+    const cmdRows = CMDS.map(([c,d])=>`<tr><td class="tc">${c}</td><td class="td2">${d}</td></tr>`).join("");
 
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>CZB // Control Panel</title>
+<title>CZB Panel</title>
 <meta http-equiv="refresh" content="10"/>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg:#07080d;
-  --bg2:#0c0e16;
-  --surface:#111420;
-  --surface2:#161927;
-  --surface3:#1c2133;
-  --border:#232840;
-  --border2:#2d3454;
-  --border3:#3d4668;
-  --text:#e8eaf6;
-  --text2:#a8b0d8;
-  --text3:#6b74a8;
-  --muted:#404870;
-  --accent:#6366f1;
-  --accent2:#818cf8;
-  --accentG:linear-gradient(135deg,#4f46e5,#6366f1,#818cf8);
-  --green:#10b981;--green2:#34d399;
-  --red:#ef4444;--red2:#f87171;
-  --yellow:#f59e0b;--yellow2:#fbbf24;
-  --purple:#a855f7;--purple2:#c084fc;
-  --blue:#3b82f6;--blue2:#60a5fa;
-  --pink:#ec4899;
+  --bg:#080a12;--s0:#0d1020;--s1:#111526;--s2:#161b2e;--s3:#1d2238;
+  --b0:#1e2440;--b1:#2a3158;--b2:#3d4870;
+  --tx:#dde3f5;--tx2:#8b95c0;--tx3:#555e85;--muted:#3a4260;
+  --ac:#5b6ef5;--ac2:#7b8ff7;--acg:linear-gradient(135deg,#4a5be0,#5b6ef5,#7b8ff7);
+  --gn:#10b981;--gn2:#34d399;
+  --rd:#ef4444;--rd2:#f87171;
+  --yw:#f59e0b;--yw2:#fbbf24;
+  --pu:#a855f7;--pu2:#c084fc;
+  --bu:#3b82f6;--bu2:#60a5fa;
   --mono:'JetBrains Mono',monospace;
   --sans:'Inter',sans-serif;
 }
 html{scroll-behavior:smooth}
-body{
-  background:var(--bg);color:var(--text);
-  font-family:var(--sans);font-size:13.5px;line-height:1.6;
-  min-height:100vh;
-  background-image:
-    radial-gradient(ellipse 50% 40% at 90% 0%,#6366f10f,transparent),
-    radial-gradient(ellipse 40% 30% at 0% 100%,#a855f708,transparent),
-    radial-gradient(ellipse 30% 20% at 50% 50%,#3b82f605,transparent);
-}
+body{background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:13.5px;line-height:1.6;min-height:100vh;
+  background-image:radial-gradient(ellipse 55% 35% at 80% -5%,#5b6ef512,transparent),radial-gradient(ellipse 40% 25% at 5% 105%,#a855f709,transparent);}
 
-/* ── TOPBAR ─────────────────────────────────── */
+/* TOPBAR */
 .topbar{
-  position:sticky;top:0;z-index:100;
-  background:rgba(7,8,13,.85);
-  backdrop-filter:blur(20px);
-  border-bottom:1px solid var(--border);
-  padding:0 28px;height:52px;
+  position:sticky;top:0;z-index:200;height:48px;
+  background:rgba(8,10,18,.9);backdrop-filter:blur(18px);
+  border-bottom:1px solid var(--b0);
   display:flex;align-items:center;justify-content:space-between;
-  gap:16px;
+  padding:0 22px;gap:16px;
 }
-.tb-left{display:flex;align-items:center;gap:20px}
-.tb-logo{
-  display:flex;align-items:center;gap:10px;
-  font-family:var(--mono);font-size:14px;font-weight:700;
-  letter-spacing:.06em;color:var(--accent2);
+.tb-l{display:flex;align-items:center;gap:14px}
+.logo{
+  display:flex;align-items:center;gap:9px;
+  font-family:var(--mono);font-size:13px;font-weight:700;color:var(--ac2);
 }
-.tb-logo-dot{
-  width:28px;height:28px;border-radius:8px;
-  background:var(--accentG);
+.logo-sq{
+  width:26px;height:26px;border-radius:7px;
+  background:var(--acg);
   display:flex;align-items:center;justify-content:center;
-  font-size:13px;font-weight:800;color:#fff;
-  box-shadow:0 0 16px #6366f140;
+  font-size:12px;font-weight:800;color:#fff;
+  box-shadow:0 0 14px #5b6ef140;
 }
-.tb-tag{
-  font-family:var(--mono);font-size:9.5px;font-weight:700;
-  text-transform:uppercase;letter-spacing:.14em;
-  padding:3px 9px;border-radius:5px;
-  background:#6366f115;border:1px solid #6366f130;
-  color:var(--accent2);
+.tag{
+  font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;
+  padding:2px 8px;border-radius:4px;background:#5b6ef514;border:1px solid #5b6ef528;color:var(--ac2);
 }
-.tb-status{
-  display:flex;align-items:center;gap:7px;
-  font-size:11.5px;color:var(--text3);font-family:var(--mono);
-}
-.tb-right{display:flex;align-items:center;gap:16px}
-.tb-devid{font-family:var(--mono);font-size:11px;color:var(--text3)}
-.tb-devid b{color:var(--accent2)}
-.sync-wrap{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text3);font-family:var(--mono)}
-.sync-dot{width:6px;height:6px;border-radius:50%;background:var(--green);animation:blink 2.4s ease-in-out infinite;box-shadow:0 0 8px var(--green)}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.15}}
+.tb-status{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--tx3);font-family:var(--mono)}
+.tb-r{display:flex;align-items:center;gap:14px;font-family:var(--mono);font-size:11px;color:var(--tx3)}
+.tb-r b{color:var(--ac2)}
+.sync{display:flex;align-items:center;gap:5px}
+.sdot{width:5px;height:5px;border-radius:50%;background:var(--gn);animation:blink 2.4s ease-in-out infinite;box-shadow:0 0 6px var(--gn)}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.1}}
 
-/* ── LAYOUT ─────────────────────────────────── */
-.page{max-width:1280px;margin:0 auto;padding:32px 24px 80px}
+/* PAGE SHELL */
+.shell{display:flex;min-height:calc(100vh - 48px)}
 
-/* ── HERO HEADER ─────────────────────────────── */
+/* SIDEBAR */
+.sidebar{
+  width:340px;flex-shrink:0;
+  background:var(--s0);border-right:1px solid var(--b0);
+  display:flex;flex-direction:column;
+  position:sticky;top:48px;height:calc(100vh - 48px);overflow-y:auto;
+}
+.sidebar::-webkit-scrollbar{width:3px}
+.sidebar::-webkit-scrollbar-thumb{background:var(--b1);border-radius:99px}
+
+/* MAIN */
+.main{flex:1;padding:24px 24px 60px;min-width:0}
+
+/* HERO */
 .hero{
-  display:flex;align-items:flex-start;justify-content:space-between;
-  gap:20px;flex-wrap:wrap;margin-bottom:36px;
-  padding:28px 32px;
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:16px;
+  background:var(--s1);border:1px solid var(--b0);border-radius:14px;
+  padding:22px 24px;margin-bottom:20px;
   position:relative;overflow:hidden;
-}
-.hero::before{
-  content:'';position:absolute;inset:0;
-  background:linear-gradient(135deg,#6366f108 0%,transparent 60%);
-  pointer-events:none;
 }
 .hero::after{
-  content:'';position:absolute;top:-60px;right:-60px;
-  width:200px;height:200px;border-radius:50%;
-  background:radial-gradient(circle,#6366f118,transparent 70%);
-  pointer-events:none;
+  content:'';position:absolute;top:-40px;right:-40px;
+  width:160px;height:160px;border-radius:50%;
+  background:radial-gradient(circle,#5b6ef514,transparent 70%);pointer-events:none;
 }
-.hero-left{display:flex;align-items:center;gap:18px}
+.hero-top{display:flex;align-items:center;gap:14px;margin-bottom:14px}
 .hero-icon{
-  width:56px;height:56px;border-radius:14px;
-  background:var(--accentG);
-  display:flex;align-items:center;justify-content:center;
-  font-size:24px;
-  box-shadow:0 0 32px #6366f150,0 8px 24px #0006;
-  flex-shrink:0;
+  width:48px;height:48px;border-radius:12px;
+  background:var(--acg);display:flex;align-items:center;justify-content:center;
+  font-size:22px;box-shadow:0 0 24px #5b6ef145,0 6px 18px #0006;flex-shrink:0;
 }
-.hero-title{font-size:22px;font-weight:800;color:var(--text);letter-spacing:-.02em;line-height:1.1}
-.hero-sub{font-size:12px;color:var(--text3);margin-top:4px;font-family:var(--mono)}
-.hero-bots{display:flex;flex-wrap:wrap;gap:8px;margin-top:16px}
+.hero-title{font-size:20px;font-weight:800;color:var(--tx);letter-spacing:-.02em}
+.hero-sub{font-size:11.5px;color:var(--tx3);font-family:var(--mono);margin-top:2px}
+.bot-pills{display:flex;flex-wrap:wrap;gap:7px}
 .bot-pill{
-  display:inline-flex;align-items:center;gap:8px;
-  padding:6px 14px;border-radius:8px;
-  font-size:11.5px;font-family:var(--mono);font-weight:500;
-  border:1px solid var(--border2);background:var(--surface2);
+  display:inline-flex;align-items:center;gap:7px;
+  padding:5px 12px;border-radius:7px;border:1px solid var(--b1);
+  background:var(--s2);font-size:11px;font-family:var(--mono);
 }
-.bot-online{border-color:#10b98130;color:var(--green2)}
-.bot-warn{border-color:#f59e0b30;color:var(--yellow2)}
-.bot-offline{border-color:var(--border2);color:var(--text3)}
-.pill-dot{
-  width:7px;height:7px;border-radius:50%;background:currentColor;flex-shrink:0;
-  animation:pillPulse 2.4s ease-in-out infinite;
-}
-.bot-offline .pill-dot{animation:none;opacity:.4}
-@keyframes pillPulse{0%,100%{opacity:1}50%{opacity:.3}}
-.pill-name{font-weight:600;color:var(--text)}
-.pill-status{opacity:.6;font-size:10.5px}
+.bot-on{border-color:#10b98130;color:var(--gn2)}
+.bot-warn{border-color:#f59e0b30;color:var(--yw2)}
+.bot-off{color:var(--tx3)}
+.bdot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0;animation:bdp 2.4s ease-in-out infinite}
+.bot-off .bdot{animation:none;opacity:.3}
+@keyframes bdp{0%,100%{opacity:1}50%{opacity:.2}}
+.bsub{opacity:.55;font-size:10px}
 
-/* ── STAT CARDS ─────────────────────────────── */
-.stats{
-  display:grid;
-  grid-template-columns:repeat(5,1fr);
-  gap:12px;margin-bottom:28px;
+/* STAT CARDS */
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:20px}
+@media(max-width:800px){.cards{grid-template-columns:1fr 1fr}}
+.card{
+  background:var(--s1);border:1px solid var(--b0);border-radius:11px;
+  padding:16px 16px 13px;position:relative;overflow:hidden;
+  transition:border-color .2s;cursor:default;
 }
-@media(max-width:900px){.stats{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:560px){.stats{grid-template-columns:1fr 1fr}}
-.stat-card{
-  background:var(--surface);border:1px solid var(--border);
-  border-radius:12px;padding:18px 18px 14px;
-  position:relative;overflow:hidden;
-  transition:border-color .2s,transform .2s;cursor:default;
-}
-.stat-card:hover{border-color:var(--border3);transform:translateY(-1px)}
-.stat-top{position:absolute;top:0;left:0;right:0;height:3px;border-radius:12px 12px 0 0}
-.s-indigo{background:linear-gradient(90deg,#4338ca,#818cf8)}
-.s-emerald{background:linear-gradient(90deg,#059669,#34d399)}
-.s-purple{background:linear-gradient(90deg,#7c3aed,#c084fc)}
-.s-amber{background:linear-gradient(90deg,#d97706,#fbbf24)}
-.s-rose{background:linear-gradient(90deg,#be123c,#fb7185)}
-.stat-label{font-size:9.5px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.14em;margin-bottom:10px}
-.stat-val{font-size:30px;font-weight:800;line-height:1;font-family:var(--mono)}
-.c-indigo{color:var(--accent2)}
-.c-emerald{color:var(--green2)}
-.c-purple{color:var(--purple2)}
-.c-amber{color:var(--yellow2)}
-.c-rose{color:var(--red2)}
-.stat-sub{font-size:10.5px;color:var(--text3);margin-top:6px}
+.card:hover{border-color:var(--b1)}
+.ct{position:absolute;top:0;left:0;right:0;height:2.5px;border-radius:11px 11px 0 0}
+.ct-i{background:linear-gradient(90deg,#4338ca,#7b8ff7)}
+.ct-g{background:linear-gradient(90deg,#059669,#34d399)}
+.ct-p{background:linear-gradient(90deg,#7c3aed,#c084fc)}
+.ct-a{background:linear-gradient(90deg,#d97706,#fbbf24)}
+.clabel{font-size:9px;font-weight:700;color:var(--tx3);text-transform:uppercase;letter-spacing:.15em;margin-bottom:8px}
+.cval{font-size:28px;font-weight:800;line-height:1;font-family:var(--mono)}
+.ci{color:var(--ac2)}.cg{color:var(--gn2)}.cp{color:var(--pu2)}.ca{color:var(--yw2)}
+.csub{font-size:10px;color:var(--tx3);margin-top:5px}
 
-/* ── SECTION LABEL ──────────────────────────── */
-.sec-label{
-  display:flex;align-items:center;gap:10px;
-  font-size:10px;font-weight:700;color:var(--text3);
-  text-transform:uppercase;letter-spacing:.18em;
-  margin-bottom:12px;
+/* PANEL */
+.panel{background:var(--s1);border:1px solid var(--b0);border-radius:11px;overflow:hidden;margin-bottom:18px}
+.ph{
+  background:var(--s2);border-bottom:1px solid var(--b0);
+  padding:10px 16px;display:flex;align-items:center;justify-content:space-between;
 }
-.sec-label::after{content:'';flex:1;height:1px;background:var(--border)}
-.sec-icon{font-size:12px;opacity:.6}
+.ph-l{display:flex;align-items:center;gap:9px}
+.pbadge{
+  font-size:8.5px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
+  padding:2px 8px;border-radius:4px;background:#5b6ef514;border:1px solid #5b6ef525;color:var(--ac2);
+}
+.pbadge-g{background:#10b98113;border-color:#10b98125;color:var(--gn2)}
+.pbadge-p{background:#a855f713;border-color:#a855f725;color:var(--pu2)}
+.ph-title{font-size:11.5px;font-weight:600;color:var(--tx2)}
+.ph-meta{font-size:10.5px;color:var(--tx3);font-family:var(--mono)}
 
-/* ── PANEL ──────────────────────────────────── */
-.panel{
-  background:var(--surface);
-  border:1px solid var(--border);
-  border-radius:12px;overflow:hidden;margin-bottom:20px;
-}
-.panel-head{
-  background:var(--surface2);
-  border-bottom:1px solid var(--border);
-  padding:12px 18px;
-  display:flex;align-items:center;justify-content:space-between;
-  gap:10px;
-}
-.ph-left{display:flex;align-items:center;gap:10px}
-.ph-badge{
-  font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;
-  padding:3px 9px;border-radius:5px;
-  background:#6366f115;border:1px solid #6366f128;color:var(--accent2);
-}
-.ph-badge-green{background:#10b98115;border-color:#10b98128;color:var(--green2)}
-.ph-badge-purple{background:#a855f715;border-color:#a855f728;color:var(--purple2)}
-.ph-title{font-size:11.5px;font-weight:600;color:var(--text2)}
-.ph-meta{font-size:10.5px;color:var(--text3);font-family:var(--mono)}
-
-/* ── TABLE ──────────────────────────────────── */
+/* TABLE */
 table{width:100%;border-collapse:collapse}
-th{
-  padding:10px 16px;text-align:left;
-  font-size:9px;font-weight:700;color:var(--muted);
-  text-transform:uppercase;letter-spacing:.13em;
-  background:var(--surface2);border-bottom:1px solid var(--border);
-}
-td{padding:10px 16px;border-bottom:1px solid var(--border);font-size:12.5px;vertical-align:middle;color:var(--text2)}
+th{padding:9px 15px;text-align:left;font-size:8.5px;font-weight:700;color:var(--tx3);text-transform:uppercase;letter-spacing:.13em;background:var(--s2);border-bottom:1px solid var(--b0)}
+td{padding:9px 15px;border-bottom:1px solid var(--b0);font-size:12.5px;vertical-align:middle;color:var(--tx2)}
 tr:last-child td{border-bottom:none}
-tr:hover td{background:#ffffff03}
-.td-mono{font-family:var(--mono);font-size:11.5px;color:var(--text3)}
-.td-center{text-align:center}
-.empty-cell{text-align:center;color:var(--text3);padding:28px;font-size:12.5px}
-.empty-cell code{background:var(--surface2);border:1px solid var(--border2);border-radius:5px;padding:1px 7px;font-family:var(--mono);color:var(--accent2);font-size:11.5px}
+tr:hover td{background:#ffffff02}
+.td-mono{font-family:var(--mono);font-size:11px;color:var(--tx3)}
+.td-empty{text-align:center;color:var(--tx3);padding:26px;font-size:12.5px}
+.td-empty code{background:var(--s2);border:1px solid var(--b1);border-radius:4px;padding:1px 6px;font-family:var(--mono);color:var(--ac2);font-size:11.5px}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;font-family:var(--mono);white-space:nowrap}
+.bg{background:#10b98116;color:var(--gn2);border:1px solid #10b98126}
+.br{background:#ef444416;color:var(--rd2);border:1px solid #ef444426}
+.by{background:#f59e0b16;color:var(--yw2);border:1px solid #f59e0b26}
+.bp{background:#a855f716;color:var(--pu2);border:1px solid #a855f726}
 
-/* ── BADGES ─────────────────────────────────── */
-.badge{display:inline-flex;align-items:center;gap:5px;padding:3px 9px;border-radius:5px;font-size:10.5px;font-weight:600;font-family:var(--mono);white-space:nowrap}
-.badge-green{background:#10b98118;color:var(--green2);border:1px solid #10b98128}
-.badge-red{background:#ef444418;color:var(--red2);border:1px solid #ef444428}
-.badge-warn{background:#f59e0b18;color:var(--yellow2);border:1px solid #f59e0b28}
-.badge-purple{background:#a855f718;color:var(--purple2);border:1px solid #a855f728}
-.badge-blue{background:#3b82f618;color:var(--blue2);border:1px solid #3b82f628}
-.dot-green,.dot-red,.dot-yellow{display:inline-block;width:8px;height:8px;border-radius:50%}
-.dot-green{background:var(--green);box-shadow:0 0 6px var(--green)}
-.dot-red{background:var(--red);opacity:.7}
-.dot-yellow{background:var(--yellow)}
+/* INPUT ROW */
+.irow{display:flex;gap:8px;padding:12px 15px;border-bottom:1px solid var(--b0);flex-wrap:wrap;align-items:center}
+.ifield{
+  flex:1;min-width:160px;background:var(--bg);border:1px solid var(--b1);
+  border-radius:7px;padding:8px 12px;color:var(--tx);font-size:12.5px;outline:none;
+  transition:border-color .2s,box-shadow .2s;font-family:var(--mono);
+}
+.ifield:focus{border-color:var(--ac);box-shadow:0 0 0 3px #5b6ef514}
+.ifield::placeholder{color:var(--muted)}
+.btn-add{
+  background:var(--acg);color:#fff;border:none;border-radius:7px;padding:8px 16px;
+  font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;
+  transition:opacity .15s;font-family:var(--sans);
+}
+.btn-add:hover{opacity:.85}
+.btn-rm{
+  background:#ef444412;color:var(--rd2);border:1px solid #ef444428;
+  border-radius:5px;padding:3px 9px;font-size:11px;font-weight:600;cursor:pointer;
+  transition:background .15s;white-space:nowrap;
+}
+.btn-rm:hover{background:#ef444425}
 
-/* ── LOG TERMINAL ────────────────────────────── */
+/* QUEUE LIST */
+.ql{padding:3px 0;max-height:260px;overflow-y:auto}
+.ql::-webkit-scrollbar{width:3px}
+.ql::-webkit-scrollbar-thumb{background:var(--b1);border-radius:99px}
+.qi{display:flex;align-items:center;gap:10px;padding:7px 15px;border-bottom:1px solid var(--b0);transition:background .1s}
+.qi:last-child{border-bottom:none}
+.qi:hover{background:#ffffff02}
+.qi-n{font-size:10px;color:var(--muted);min-width:24px;font-family:var(--mono)}
+.qi-v{color:var(--tx2);font-size:12px;word-break:break-all;flex:1;font-family:var(--mono)}
+.empty-q{color:var(--tx3);text-align:center;padding:22px;font-size:12px}
+
+/* COMMAND TABLE */
+.tc{font-family:var(--mono);font-size:11.5px;color:var(--ac2);white-space:nowrap;width:1%;padding-right:4px}
+.td2{color:var(--tx3);font-size:12px}
+
+/* ─── SIDEBAR SECTIONS ──────────────────────────── */
+.sb-section{border-bottom:1px solid var(--b0)}
+.sb-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:11px 16px;cursor:pointer;
+  font-size:10px;font-weight:700;color:var(--tx2);text-transform:uppercase;letter-spacing:.14em;
+  user-select:none;
+}
+.sb-head:hover{background:#ffffff03}
+.sb-head span{font-size:11px;color:var(--tx3)}
+.sb-body{padding:0}
+
+/* LOGS IN SIDEBAR */
 .log-wrap{
-  max-height:340px;overflow-y:auto;
-  background:var(--bg);padding:4px 0;
-  font-family:var(--mono);font-size:11.5px;
-  scroll-behavior:smooth;
+  max-height:320px;overflow-y:auto;
+  background:var(--bg);padding:4px 0;font-family:var(--mono);font-size:11px;
 }
 .log-wrap::-webkit-scrollbar{width:3px}
-.log-wrap::-webkit-scrollbar-thumb{background:var(--border3);border-radius:99px}
-.log-row{display:flex;align-items:flex-start;gap:14px;padding:4px 18px;line-height:1.55;transition:background .1s}
-.log-row:hover{background:#ffffff02}
-.log-time{color:var(--muted);font-size:10px;flex-shrink:0;min-width:68px;padding-top:1px}
-.log-lvl{font-size:9.5px;font-weight:700;flex-shrink:0;min-width:38px;padding-top:2px;text-transform:uppercase;letter-spacing:.06em}
-.log-msg{color:var(--text3);word-break:break-word;flex:1}
-.log-error .log-lvl{color:var(--red2)}.log-error .log-msg{color:#fca5a5}
-.log-warn  .log-lvl{color:var(--yellow2)}.log-warn  .log-msg{color:#fde68a}
-.log-reply .log-lvl{color:var(--green2)}.log-reply .log-msg{color:#6ee7b7}
-.log-info  .log-lvl{color:var(--accent2)}.log-info  .log-msg{color:var(--text3)}
-.log-idle  .log-lvl{color:var(--muted)}.log-idle  .log-msg{color:var(--muted)}
+.log-wrap::-webkit-scrollbar-thumb{background:var(--b1);border-radius:99px}
+.lrow{display:flex;gap:10px;padding:3px 14px;line-height:1.5;transition:background .1s}
+.lrow:hover{background:#ffffff02}
+.ltime{color:var(--muted);font-size:9.5px;flex-shrink:0;min-width:64px;padding-top:1px}
+.llvl{font-size:9px;font-weight:700;flex-shrink:0;min-width:34px;padding-top:2px;text-transform:uppercase}
+.lmsg{color:var(--tx3);word-break:break-word;flex:1;font-size:10.5px}
+.lerror .llvl{color:var(--rd2)}.lerror .lmsg{color:#fca5a5}
+.lwarn  .llvl{color:var(--yw2)}.lwarn  .lmsg{color:#fde68a}
+.lreply .llvl{color:var(--gn2)}.lreply .lmsg{color:#6ee7b7}
+.linfo  .llvl{color:var(--ac2)}.linfo  .lmsg{color:var(--tx3)}
+.lidle  .llvl{color:var(--muted)}.lidle  .lmsg{color:var(--muted)}
 
-/* ── TWO COL ─────────────────────────────────── */
-.two-col{display:grid;grid-template-columns:1.1fr 1fr;gap:18px;margin-bottom:20px}
-.three-col{display:grid;grid-template-columns:1fr 1fr 1fr;gap:18px;margin-bottom:20px}
-@media(max-width:900px){.two-col,.three-col{grid-template-columns:1fr}}
-@media(max-width:680px){.page{padding:20px 14px 60px}}
-
-/* ── INPUT + FORMS ───────────────────────────── */
-.input-row{display:flex;gap:10px;padding:14px 18px;border-bottom:1px solid var(--border);flex-wrap:wrap;align-items:center}
-.input-field{
-  flex:1;min-width:200px;
-  background:var(--bg2);border:1px solid var(--border2);
-  border-radius:8px;padding:9px 14px;
-  color:var(--text);font-size:13px;outline:none;
-  transition:border-color .2s,box-shadow .2s;
-  font-family:var(--mono);
-}
-.input-field:focus{border-color:var(--accent);box-shadow:0 0 0 3px #6366f115}
-.input-field::placeholder{color:var(--muted)}
-.btn-primary{
-  background:var(--accentG);color:#fff;border:none;
-  border-radius:8px;padding:9px 20px;font-size:12px;font-weight:600;
-  cursor:pointer;display:inline-flex;align-items:center;gap:6px;
-  transition:opacity .15s,transform .15s;font-family:var(--sans);
-  white-space:nowrap;letter-spacing:.02em;
-}
-.btn-primary:hover{opacity:.88;transform:translateY(-1px)}
-.btn-save{
-  background:linear-gradient(135deg,#2563eb,#3b82f6);color:#fff;border:none;
-  border-radius:8px;padding:9px 22px;font-size:12px;font-weight:600;
-  cursor:pointer;transition:opacity .15s;font-family:var(--sans);
-  letter-spacing:.02em;
-}
-.btn-save:hover{opacity:.88}
-.btn-danger-sm{
-  background:#ef444415;color:var(--red2);border:1px solid #ef444428;
-  border-radius:6px;padding:4px 11px;font-size:11px;font-weight:600;
-  cursor:pointer;transition:background .15s;white-space:nowrap;font-family:var(--sans);
-}
-.btn-danger-sm:hover{background:#ef444425}
-
-/* ── QUEUE LIST ──────────────────────────────── */
-.queue-list{padding:4px 0;max-height:340px;overflow-y:auto}
-.queue-list::-webkit-scrollbar{width:3px}
-.queue-list::-webkit-scrollbar-thumb{background:var(--border3);border-radius:99px}
-.queue-item{
-  display:flex;align-items:center;gap:12px;
-  padding:8px 18px;border-bottom:1px solid var(--border);
-  transition:background .1s;
-}
-.queue-item:last-child{border-bottom:none}
-.queue-item:hover{background:#ffffff02}
-.queue-num{font-size:10px;color:var(--muted);min-width:26px;font-family:var(--mono)}
-.queue-text{color:var(--text2);font-size:12.5px;word-break:break-word;flex:1;font-family:var(--mono)}
-.empty-queue{color:var(--text3);text-align:center;padding:28px;font-size:12.5px}
-
-/* ── CONFIG GRID ─────────────────────────────── */
-.cfg-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;padding:18px;border-bottom:1px solid var(--border)}
-.cfg-grid-2{grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
-.cfg-group{
-  padding:18px;border-bottom:1px solid var(--border);
-}
+/* CONFIG FORM IN SIDEBAR */
+.cfg-form{padding:14px 16px}
 .cfg-group-title{
-  font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;
-  color:var(--accent2);margin-bottom:14px;display:flex;align-items:center;gap:8px;
+  font-size:9.5px;font-weight:700;color:var(--ac2);text-transform:uppercase;letter-spacing:.14em;
+  margin-bottom:12px;margin-top:6px;padding-bottom:6px;border-bottom:1px solid var(--b0);
 }
-.cfg-group-title::after{content:'';flex:1;height:1px;background:var(--border)}
-.cfg-field{display:flex;flex-direction:column;gap:6px}
-.cfg-label{font-size:9.5px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.12em}
-.cfg-input{
-  background:var(--bg2);border:1px solid var(--border2);
-  border-radius:7px;padding:8px 13px;color:var(--text);
-  font-size:12.5px;outline:none;transition:border-color .2s,box-shadow .2s;
-  font-family:var(--mono);width:100%;
+.cfg-field{margin-bottom:12px}
+.cfg-label{display:block;font-size:9px;font-weight:700;color:var(--tx3);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px}
+.cfg-input,.cfg-select{
+  width:100%;background:var(--bg);border:1px solid var(--b1);
+  border-radius:6px;padding:7px 11px;color:var(--tx);font-size:12px;outline:none;
+  transition:border-color .2s;font-family:var(--mono);
 }
-.cfg-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px #6366f115}
 .cfg-select{
-  background:var(--bg2);border:1px solid var(--border2);
-  border-radius:7px;padding:8px 13px;color:var(--text);
-  font-size:12.5px;outline:none;transition:border-color .2s;
-  font-family:var(--mono);width:100%;cursor:pointer;
   appearance:none;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b74a8' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
-  background-repeat:no-repeat;background-position:right 12px center;
-  padding-right:34px;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='%23555e85' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat:no-repeat;background-position:right 10px center;padding-right:28px;
+  cursor:pointer;
 }
-.cfg-select:focus{border-color:var(--accent)}
-.cfg-hint{font-size:10.5px;color:var(--muted);line-height:1.4;margin-top:2px}
-.cfg-checkbox-row{display:flex;align-items:center;gap:10px;padding:4px 0}
-.cfg-checkbox{
-  width:36px;height:20px;border-radius:10px;cursor:pointer;
-  background:var(--border2);border:none;outline:none;
-  position:relative;appearance:none;transition:background .2s;flex-shrink:0;
+.cfg-input:focus,.cfg-select:focus{border-color:var(--ac)}
+.cfg-hint{font-size:9.5px;color:var(--muted);margin-top:3px;line-height:1.4}
+.cfg-check-row{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.cfg-check{
+  width:32px;height:18px;border-radius:9px;cursor:pointer;
+  background:var(--b1);border:none;outline:none;position:relative;appearance:none;transition:background .2s;flex-shrink:0;
 }
-.cfg-checkbox:checked{background:var(--accent)}
-.cfg-checkbox::after{
-  content:'';position:absolute;top:3px;left:3px;
-  width:14px;height:14px;border-radius:50%;
-  background:#fff;transition:transform .2s;
+.cfg-check:checked{background:var(--ac)}
+.cfg-check::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#fff;transition:transform .2s}
+.cfg-check:checked::after{transform:translateX(14px)}
+.cfg-check-label{font-size:11.5px;color:var(--tx2);cursor:pointer}
+.btn-save{
+  width:100%;background:var(--acg);color:#fff;border:none;border-radius:7px;
+  padding:9px;font-size:12.5px;font-weight:600;cursor:pointer;
+  transition:opacity .15s;font-family:var(--sans);margin-top:4px;
 }
-.cfg-checkbox:checked::after{transform:translateX(16px)}
-.cfg-check-label{font-size:12px;color:var(--text2);cursor:pointer}
-.cfg-footer{
-  padding:14px 18px;
-  display:flex;align-items:center;justify-content:space-between;
-  flex-wrap:wrap;gap:10px;
-}
-.cfg-note{font-size:11px;color:var(--text3)}
-.cfg-note b{color:var(--text2)}
+.btn-save:hover{opacity:.85}
 
-/* ── COMMANDS ─────────────────────────────────── */
-.cmd-name{font-family:var(--mono);font-size:11.5px;color:var(--accent2);white-space:nowrap;width:1%}
-.cmd-desc{color:var(--text3);font-size:12.5px}
+/* COOKIE SECTION */
+.cookie-area{
+  width:100%;background:var(--bg);border:1px solid var(--b1);
+  border-radius:6px;padding:8px 10px;color:var(--tx);font-size:10px;
+  font-family:var(--mono);outline:none;resize:vertical;min-height:90px;
+  transition:border-color .2s;line-height:1.5;
+}
+.cookie-area:focus{border-color:var(--ac)}
+.cookie-area::placeholder{color:var(--muted)}
+.btn-cookie{
+  width:100%;background:linear-gradient(135deg,#059669,#10b981);color:#fff;
+  border:none;border-radius:7px;padding:8px;font-size:12px;font-weight:600;
+  cursor:pointer;transition:opacity .15s;font-family:var(--sans);margin-top:6px;
+}
+.btn-cookie:hover{opacity:.85}
+.cookie-hint{font-size:9.5px;color:var(--muted);margin-top:5px;line-height:1.4}
 
-/* ── FOOTER ──────────────────────────────────── */
-.page-footer{
+/* SECTION LABEL (main area) */
+.slabel{
+  display:flex;align-items:center;gap:8px;
+  font-size:9.5px;font-weight:700;color:var(--tx3);text-transform:uppercase;letter-spacing:.17em;margin-bottom:11px;
+}
+.slabel::after{content:'';flex:1;height:1px;background:var(--b0)}
+
+/* FOOTER */
+.footer{
+  border-top:1px solid var(--b0);padding-top:16px;margin-top:8px;
   display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;
-  border-top:1px solid var(--border);padding-top:18px;margin-top:12px;
   font-size:11px;color:var(--muted);font-family:var(--mono);
 }
-.footer-r{display:flex;align-items:center;gap:7px}
+.footer-r{display:flex;align-items:center;gap:6px}
+
+@media(max-width:900px){
+  .shell{flex-direction:column}
+  .sidebar{width:100%;position:relative;height:auto;border-right:none;border-bottom:1px solid var(--b0)}
+  .cards{grid-template-columns:1fr 1fr}
+}
 </style>
 </head>
 <body>
 
-<!-- TOP BAR -->
+<!-- TOPBAR -->
 <div class="topbar">
-  <div class="tb-left">
-    <div class="tb-logo">
-      <div class="tb-logo-dot">C</div>
-      CZB<span style="opacity:.4">::</span>panel
+  <div class="tb-l">
+    <div class="logo">
+      <div class="logo-sq">C</div>
+      CZB<span style="opacity:.3;margin:0 2px">::</span>panel
     </div>
-    <span class="tb-tag">v2.0</span>
+    <span class="tag">v2.1</span>
     <div class="tb-status">
-      <span style="width:7px;height:7px;border-radius:50%;background:${statusColor};display:inline-block;box-shadow:0 0 8px ${statusColor}"></span>
+      <span style="width:7px;height:7px;border-radius:50%;background:${statusColor};display:inline-block;box-shadow:0 0 8px ${statusColor}80"></span>
       ${statusText}
     </div>
   </div>
-  <div class="tb-right">
-    <div class="tb-devid">dev <b>${esc(state.developerID||"—")}</b></div>
-    <div class="sync-wrap"><div class="sync-dot"></div>live · 10s</div>
+  <div class="tb-r">
+    <span>dev <b>${esc(state.developerID||"—")}</b></span>
+    <div class="sync"><div class="sdot"></div>live · 10s</div>
   </div>
 </div>
 
-<div class="page">
+<div class="shell">
 
-<!-- HERO -->
-<div class="hero">
-  <div>
-    <div class="hero-left">
-      <div class="hero-icon">🤖</div>
-      <div>
-        <div class="hero-title">Messenger Bot Control Panel</div>
-        <div class="hero-sub">loop engine · pm-loop · deep search · group protection · tts module</div>
-      </div>
-    </div>
-    <div class="hero-bots">${botBadges}</div>
-  </div>
-  <div style="text-align:right;font-family:var(--mono);font-size:11px;color:var(--text3);line-height:2">
-    <div>replies sent <span style="color:var(--accent2);font-weight:700;font-size:16px">${state.totalRepliesSent}</span></div>
-    <div>uptime <span style="color:var(--green2);font-weight:700">${getUptime()}</span></div>
-  </div>
-</div>
+<!-- ══ SIDEBAR ══════════════════════════════════════════════════════════ -->
+<aside class="sidebar">
 
-<!-- STATS -->
-<div class="stats">
-  <div class="stat-card">
-    <div class="stat-top s-indigo"></div>
-    <div class="stat-label">Messages Sent</div>
-    <div class="stat-val c-indigo">${state.totalRepliesSent}</div>
-    <div class="stat-sub">total dispatches</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-top s-emerald"></div>
-    <div class="stat-label">Active Loops</div>
-    <div class="stat-val c-emerald">${activeCount}</div>
-    <div class="stat-sub">threads running</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-top s-purple"></div>
-    <div class="stat-label">PM Loops</div>
-    <div class="stat-val c-purple">${pmLoopCount}</div>
-    <div class="stat-sub">deep search active</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-top s-amber"></div>
-    <div class="stat-label">Total Threads</div>
-    <div class="stat-val c-amber">${threads.length}</div>
-    <div class="stat-sub">${offCount} idle · ${mutedCount} muted</div>
-  </div>
-  <div class="stat-card">
-    <div class="stat-top s-rose"></div>
-    <div class="stat-label">Uptime</div>
-    <div class="stat-val c-rose" style="font-size:${getUptime().length>6?'18':'28'}px;padding-top:4px">${getUptime()}</div>
-    <div class="stat-sub">since boot</div>
-  </div>
-</div>
-
-<!-- THREADS + LOGS -->
-<div class="two-col">
-  <div>
-    <div class="sec-label"><span class="sec-icon">📡</span> Thread Registry</div>
-    <div class="panel">
-      <div class="panel-head">
-        <div class="ph-left"><span class="ph-badge ph-badge-green">LIVE</span><span class="ph-title">Active Threads</span></div>
-        <span class="ph-meta">${threads.length} total</span>
-      </div>
-      <table>
-        <thead><tr><th>Thread ID</th><th>State</th><th style="text-align:center">Active</th><th style="text-align:center">Muted</th></tr></thead>
-        <tbody>${threadRows}</tbody>
-      </table>
-    </div>
-  </div>
-  <div>
-    <div class="sec-label"><span class="sec-icon">🖥</span> System Log</div>
-    <div class="panel">
-      <div class="panel-head">
-        <div class="ph-left"><span class="ph-badge">STREAM</span><span class="ph-title">Event Output</span></div>
-        <span class="ph-meta">${logs.length} entries</span>
-      </div>
+  <!-- LIVE LOGS -->
+  <div class="sb-section">
+    <div class="sb-head">📡 Live Logs <span>${logs.length} entries</span></div>
+    <div class="sb-body">
       <div class="log-wrap">${logRows}</div>
     </div>
   </div>
-</div>
 
-<!-- MESSAGE QUEUE -->
-<div class="sec-label"><span class="sec-icon">💬</span> Loop Message Queue</div>
-<div class="panel">
-  <div class="panel-head">
-    <div class="ph-left"><span class="ph-badge">QUEUE</span><span class="ph-title">Custom Reply Pool</span></div>
-    <span class="ph-meta" style="color:var(--accent2);font-weight:600">${customReplies.length} custom · ${customReplies.length + 102} total</span>
-  </div>
-  <form class="input-row" method="POST" action="/api/replies/add">
-    <input class="input-field" type="text" name="word" placeholder="Add new message to the loop queue…" autocomplete="off" required/>
-    <button class="btn-primary" type="submit">＋ Push to Queue</button>
-  </form>
-  <div class="queue-list">${customWordRows}</div>
-</div>
+  <!-- LOOP CONFIG -->
+  <div class="sb-section">
+    <div class="sb-head">⚙️ Loop Settings</div>
+    <div class="sb-body">
+      <form method="POST" action="/api/config/save" class="cfg-form">
+        <div class="cfg-group-title">Loop Engine (dot trigger)</div>
 
-<!-- LOOP SETTINGS -->
-<div class="sec-label"><span class="sec-icon">⚙️</span> Runtime Configuration</div>
-<div class="panel">
-  <div class="panel-head">
-    <div class="ph-left"><span class="ph-badge">CONFIG</span><span class="ph-title">Loop Engine</span></div>
-    <span class="ph-meta">writes to /data/bot_config.json</span>
-  </div>
-  <form method="POST" action="/api/config/save">
-
-    <div class="cfg-group">
-      <div class="cfg-group-title">Group Loop Settings</div>
-      <div class="cfg-grid">
         <div class="cfg-field">
-          <label class="cfg-label">Loop Reaction</label>
-          <input class="cfg-input" type="text" name="loopReact" value="${esc(botConfig.loopReact||'😆')}" maxlength="8"/>
-          <span class="cfg-hint">Emoji reacted to each sent message</span>
+          <label class="cfg-label">Reaction Emoji</label>
+          <input class="cfg-input" type="text" name="loopReact" value="${esc(cfg.loopReact||'😆')}" maxlength="8"/>
         </div>
         <div class="cfg-field">
-          <label class="cfg-label">Loop Delay (seconds)</label>
-          <input class="cfg-input" type="number" name="loopDelay" value="${botConfig.loopDelay||5}" min="1" max="300"/>
-          <span class="cfg-hint">Interval between each dispatch</span>
+          <label class="cfg-label">Delay (seconds)</label>
+          <input class="cfg-input" type="number" name="loopDelay" value="${cfg.loopDelay||5}" min="1" max="300"/>
+          <div class="cfg-hint">Interval between each message</div>
         </div>
         <div class="cfg-field">
           <label class="cfg-label">Image Chance (%)</label>
-          <input class="cfg-input" type="number" name="imageProbability" value="${botConfig.imageProbability||20}" min="0" max="100"/>
-          <span class="cfg-hint">Probability of sending an image</span>
+          <input class="cfg-input" type="number" name="imageProbability" value="${cfg.imageProbability||20}" min="0" max="100"/>
+          <div class="cfg-hint">Probability of sending an image URL</div>
         </div>
         <div class="cfg-field">
           <label class="cfg-label">Loop Mode</label>
           <select class="cfg-select" name="loopMode">
-            <option value="sequential" ${botConfig.loopMode==="sequential"?"selected":""}>Sequential</option>
-            <option value="shuffle" ${botConfig.loopMode==="shuffle"?"selected":""}>Shuffle</option>
+            <option value="sequential" ${cfg.loopMode==="sequential"?"selected":""}>Sequential</option>
+            <option value="shuffle" ${cfg.loopMode==="shuffle"?"selected":""}>Shuffle</option>
           </select>
-          <span class="cfg-hint">Message selection order</span>
         </div>
         <div class="cfg-field">
-          <label class="cfg-label">Max Loop Count</label>
-          <input class="cfg-input" type="number" name="maxLoopCount" value="${botConfig.maxLoopCount||0}" min="0"/>
-          <span class="cfg-hint">0 = unlimited</span>
+          <label class="cfg-label">Max Messages (0 = unlimited)</label>
+          <input class="cfg-input" type="number" name="maxLoopCount" value="${cfg.maxLoopCount||0}" min="0"/>
         </div>
         <div class="cfg-field">
-          <label class="cfg-label">Auto-Stop (minutes)</label>
-          <input class="cfg-input" type="number" name="autoStopMinutes" value="${botConfig.autoStopMinutes||0}" min="0"/>
-          <span class="cfg-hint">Auto-stop loop after N minutes (0 = disabled)</span>
+          <label class="cfg-label">Auto-Stop After (minutes, 0 = off)</label>
+          <input class="cfg-input" type="number" name="autoStopMinutes" value="${cfg.autoStopMinutes||0}" min="0"/>
         </div>
         <div class="cfg-field">
           <label class="cfg-label">Start Message</label>
-          <input class="cfg-input" type="text" name="loopStartMsg" value="${esc(botConfig.loopStartMsg||'')}" placeholder="Message sent when loop starts"/>
+          <input class="cfg-input" type="text" name="loopStartMsg" value="${esc(cfg.loopStartMsg||'')}" placeholder="Sent when loop starts"/>
         </div>
         <div class="cfg-field">
           <label class="cfg-label">Stop Message</label>
-          <input class="cfg-input" type="text" name="loopStopMsg" value="${esc(botConfig.loopStopMsg||'')}" placeholder="Message sent when loop stops"/>
+          <input class="cfg-input" type="text" name="loopStopMsg" value="${esc(cfg.loopStopMsg||'')}" placeholder="Sent when loop stops"/>
         </div>
-      </div>
-      <div style="padding:8px 18px 16px;display:flex;gap:20px;flex-wrap:wrap">
-        <div class="cfg-checkbox-row">
-          <input class="cfg-checkbox" type="checkbox" id="reactOnly" name="reactOnlyMode" value="1" ${botConfig.reactOnlyMode?"checked":""}>
-          <label class="cfg-check-label" for="reactOnly">React-only mode (no images)</label>
+        <div class="cfg-check-row">
+          <input class="cfg-check" type="checkbox" id="reactOnly" name="reactOnlyMode" value="1" ${cfg.reactOnlyMode?"checked":""}>
+          <label class="cfg-check-label" for="reactOnly">React-only (no image sending)</label>
         </div>
-      </div>
-    </div>
 
-    <div class="cfg-group">
-      <div class="cfg-group-title">PM Loop + Deep Search</div>
-      <div class="cfg-grid cfg-grid-2">
-        <div class="cfg-field">
-          <label class="cfg-label">PM Loop Reaction</label>
-          <input class="cfg-input" type="text" name="pmLoopReact" value="${esc(botConfig.pmLoopReact||'❤️')}" maxlength="8"/>
-          <span class="cfg-hint">Emoji reacted to each PM loop message</span>
-        </div>
-        <div class="cfg-field">
-          <label class="cfg-label">PM Loop Delay (seconds)</label>
-          <input class="cfg-input" type="number" name="pmLoopDelay" value="${botConfig.pmLoopDelay||10}" min="3" max="300"/>
-          <span class="cfg-hint">Interval between PM loop messages</span>
-        </div>
-        <div class="cfg-field">
-          <label class="cfg-label">PM Loop Mode</label>
-          <select class="cfg-select" name="pmLoopMode">
-            <option value="shuffle" ${botConfig.pmLoopMode==="shuffle"?"selected":""}>Shuffle</option>
-            <option value="sequential" ${botConfig.pmLoopMode==="sequential"?"selected":""}>Sequential</option>
-          </select>
-        </div>
-        <div class="cfg-field">
-          <label class="cfg-label">Search Source</label>
-          <select class="cfg-select" name="pmSearchSource">
-            ${QUOTE_SOURCES.map(s=>`<option value="${s}" ${botConfig.pmSearchSource===s?"selected":""}>${s.charAt(0).toUpperCase()+s.slice(1)}</option>`).join("")}
-          </select>
-          <span class="cfg-hint">Where to fetch deep search quotes</span>
-        </div>
-        <div class="cfg-field">
-          <label class="cfg-label">Search Category</label>
-          <select class="cfg-select" name="pmSearchCategory">
-            ${["inspirational","wisdom","love","life","motivational","success","friendship","humor","philosophy","literature"].map(c=>`<option value="${c}" ${botConfig.pmSearchCategory===c?"selected":""}>${c.charAt(0).toUpperCase()+c.slice(1)}</option>`).join("")}
-          </select>
-          <span class="cfg-hint">Topic/category for the quote API</span>
-        </div>
-        <div class="cfg-field">
-          <label class="cfg-label">Message Prefix</label>
-          <input class="cfg-input" type="text" name="pmSearchPrefix" value="${esc(botConfig.pmSearchPrefix||'')}" placeholder="e.g. 💌 Good morning!"/>
-          <span class="cfg-hint">Text added before each quote</span>
-        </div>
-        <div class="cfg-field">
-          <label class="cfg-label">Message Suffix</label>
-          <input class="cfg-input" type="text" name="pmSearchSuffix" value="${esc(botConfig.pmSearchSuffix||'')}" placeholder="e.g. — have a great day! 🌸"/>
-          <span class="cfg-hint">Text added after each quote</span>
-        </div>
-      </div>
-      <div style="padding:8px 18px 16px;display:flex;gap:24px;flex-wrap:wrap">
-        <div class="cfg-checkbox-row">
-          <input class="cfg-checkbox" type="checkbox" id="searchEnabled" name="pmSearchEnabled" value="1" ${botConfig.pmSearchEnabled?"checked":""}>
-          <label class="cfg-check-label" for="searchEnabled">Enable deep search quotes for PM loop</label>
-        </div>
-        <div class="cfg-checkbox-row">
-          <input class="cfg-checkbox" type="checkbox" id="typingSimulate" name="typingSimulate" value="1" ${botConfig.typingSimulate?"checked":""}>
-          <label class="cfg-check-label" for="typingSimulate">Simulate typing before sending</label>
-        </div>
-      </div>
-    </div>
+        <div class="cfg-group-title" style="margin-top:14px">General</div>
 
-    <div class="cfg-group">
-      <div class="cfg-group-title">General Settings</div>
-      <div class="cfg-grid">
         <div class="cfg-field">
           <label class="cfg-label">TTS Language</label>
           <select class="cfg-select" name="ttsLang">
-            ${[["tl","Tagalog"],["en","English"],["ja","Japanese"],["ko","Korean"],["zh","Chinese"],["es","Spanish"],["fr","French"],["de","German"]].map(([v,n])=>`<option value="${v}" ${botConfig.ttsLang===v?"selected":""}>${n} (${v})</option>`).join("")}
+            ${[["tl","Tagalog"],["en","English"],["ja","Japanese"],["ko","Korean"],["zh","Chinese"],["es","Spanish"],["fr","French"],["de","German"]].map(([v,n])=>`<option value="${v}" ${cfg.ttsLang===v?"selected":""}>${n}</option>`).join("")}
           </select>
-          <span class="cfg-hint">Language for !vm voice messages</span>
         </div>
         <div class="cfg-field">
           <label class="cfg-label">Welcome Message</label>
-          <input class="cfg-input" type="text" name="greetMsg" value="${esc(botConfig.greetMsg||'Welcome! 👋')}" placeholder="Welcome message for new members"/>
+          <input class="cfg-input" type="text" name="greetMsg" value="${esc(cfg.greetMsg||'Welcome! 👋')}" placeholder="For new members"/>
         </div>
         <div class="cfg-field">
           <label class="cfg-label">Anti-Spam Max Msgs</label>
-          <input class="cfg-input" type="number" name="antiSpamMaxMsg" value="${botConfig.antiSpamMaxMsg||5}" min="2" max="50"/>
-          <span class="cfg-hint">Messages before kick</span>
+          <input class="cfg-input" type="number" name="antiSpamMaxMsg" value="${cfg.antiSpamMaxMsg||5}" min="2"/>
         </div>
         <div class="cfg-field">
           <label class="cfg-label">Anti-Spam Window (s)</label>
-          <input class="cfg-input" type="number" name="antiSpamWindowSec" value="${botConfig.antiSpamWindowSec||10}" min="3" max="120"/>
-          <span class="cfg-hint">Time window for spam detection</span>
+          <input class="cfg-input" type="number" name="antiSpamWindowSec" value="${cfg.antiSpamWindowSec||10}" min="3"/>
         </div>
-      </div>
-      <div style="padding:8px 18px 16px;display:flex;gap:24px;flex-wrap:wrap">
-        <div class="cfg-checkbox-row">
-          <input class="cfg-checkbox" type="checkbox" id="greetNew" name="greetNewMembers" value="1" ${botConfig.greetNewMembers?"checked":""}>
-          <label class="cfg-check-label" for="greetNew">Greet new group members</label>
+        <div class="cfg-check-row">
+          <input class="cfg-check" type="checkbox" id="greetNew" name="greetNewMembers" value="1" ${cfg.greetNewMembers?"checked":""}>
+          <label class="cfg-check-label" for="greetNew">Greet new members</label>
         </div>
-        <div class="cfg-checkbox-row">
-          <input class="cfg-checkbox" type="checkbox" id="antiSpam" name="antiSpamEnabled" value="1" ${botConfig.antiSpamEnabled?"checked":""}>
-          <label class="cfg-check-label" for="antiSpam">Enable anti-spam (auto-kick spammers)</label>
+        <div class="cfg-check-row">
+          <input class="cfg-check" type="checkbox" id="antiSpam" name="antiSpamEnabled" value="1" ${cfg.antiSpamEnabled?"checked":""}>
+          <label class="cfg-check-label" for="antiSpam">Anti-spam auto-kick</label>
         </div>
-        <div class="cfg-checkbox-row">
-          <input class="cfg-checkbox" type="checkbox" id="autoSeen" name="autoSeenEnabled" value="1" ${botConfig.autoSeenEnabled?"checked":""}>
-          <label class="cfg-check-label" for="autoSeen">Auto mark messages as seen</label>
+        <div class="cfg-check-row">
+          <input class="cfg-check" type="checkbox" id="autoSeen" name="autoSeenEnabled" value="1" ${cfg.autoSeenEnabled?"checked":""}>
+          <label class="cfg-check-label" for="autoSeen">Auto mark seen</label>
         </div>
-      </div>
-    </div>
+        <div class="cfg-check-row">
+          <input class="cfg-check" type="checkbox" id="typing" name="typingSimulate" value="1" ${cfg.typingSimulate?"checked":""}>
+          <label class="cfg-check-label" for="typing">Simulate typing</label>
+        </div>
 
-    <div class="cfg-footer">
-      <span class="cfg-note">Trigger: <b>.</b> to toggle loop · <b>!pmloop</b> for PM loop · <b>!quote</b> for on-demand search</span>
-      <button class="btn-save" type="submit">▶ Apply Configuration</button>
+        <button class="btn-save" type="submit">▶ Save Configuration</button>
+      </form>
     </div>
-  </form>
-</div>
-
-<!-- COMMAND REFERENCE -->
-<div class="sec-label"><span class="sec-icon">📟</span> Command Reference</div>
-<div class="panel">
-  <div class="panel-head">
-    <div class="ph-left"><span class="ph-badge ph-badge-purple">DOCS</span><span class="ph-title">Available Commands</span></div>
-    <span class="ph-meta">prefix: <span style="color:var(--accent2);font-weight:700">!</span></span>
   </div>
-  <table>
-    <thead><tr><th style="width:220px">Command</th><th>Description</th></tr></thead>
-    <tbody>${cmdRows}</tbody>
-  </table>
-</div>
 
-<!-- FOOTER -->
-<div class="page-footer">
-  <span>czb::panel v2.0 &nbsp;·&nbsp; node.js &nbsp;·&nbsp; ws3-fca &nbsp;·&nbsp; prefix <span style="color:var(--accent2)">!</span></span>
-  <div class="footer-r"><div class="sync-dot"></div><span>auto-refresh every 10s</span></div>
-</div>
+  <!-- SESSION / COOKIE -->
+  <div class="sb-section">
+    <div class="sb-head">🔑 Update Session Cookie</div>
+    <div class="sb-body">
+      <form method="POST" action="/api/fbstate/update" class="cfg-form">
+        <textarea class="cookie-area" name="fbstate" placeholder='Paste your new fbstate JSON here…&#10;[{"key":"c_user","value":"..."},...]' required></textarea>
+        <div class="cookie-hint">Paste the full fbstate JSON array from your session exporter. Bot will restart automatically after saving.</div>
+        <button class="btn-cookie" type="submit">💾 Save &amp; Restart Bot</button>
+      </form>
+    </div>
+  </div>
 
+</aside>
+
+<!-- ══ MAIN CONTENT ══════════════════════════════════════════════════════ -->
+<main class="main">
+
+  <!-- HERO -->
+  <div class="hero">
+    <div class="hero-top">
+      <div class="hero-icon">🤖</div>
+      <div>
+        <div class="hero-title">Messenger Bot Control Panel</div>
+        <div class="hero-sub">loop (dot) · auto-respond (!on/!off) · group protection · tts · image loop</div>
+      </div>
+    </div>
+    <div class="bot-pills">${botBadges}</div>
+  </div>
+
+  <!-- STATS -->
+  <div class="cards">
+    <div class="card">
+      <div class="ct ct-i"></div>
+      <div class="clabel">Messages Sent</div>
+      <div class="cval ci">${state.totalRepliesSent}</div>
+      <div class="csub">total dispatches</div>
+    </div>
+    <div class="card">
+      <div class="ct ct-g"></div>
+      <div class="clabel">Active Loops</div>
+      <div class="cval cg">${loopCount}</div>
+      <div class="csub">dot-triggered</div>
+    </div>
+    <div class="card">
+      <div class="ct ct-p"></div>
+      <div class="clabel">Auto-Respond</div>
+      <div class="cval cp">${arCount}</div>
+      <div class="csub">${mutedCount} muted · groups only</div>
+    </div>
+    <div class="card">
+      <div class="ct ct-a"></div>
+      <div class="clabel">Uptime</div>
+      <div class="cval ca" style="font-size:${getUptime().length>6?'18':'26'}px;padding-top:4px">${getUptime()}</div>
+      <div class="csub">since boot</div>
+    </div>
+  </div>
+
+  <!-- THREAD REGISTRY -->
+  <div class="slabel">📡 Thread Registry</div>
+  <div class="panel">
+    <div class="ph">
+      <div class="ph-l"><span class="pbadge pbadge-g">LIVE</span><span class="ph-title">Active Threads</span></div>
+      <span class="ph-meta">${uniqueThreads.length} total</span>
+    </div>
+    <table>
+      <thead><tr><th>Thread ID</th><th>Loop State</th><th>Auto-Respond</th></tr></thead>
+      <tbody>${threadRows}</tbody>
+    </table>
+  </div>
+
+  <!-- MESSAGE QUEUE -->
+  <div class="slabel">💬 Loop Message Queue</div>
+  <div class="panel">
+    <div class="ph">
+      <div class="ph-l"><span class="pbadge">QUEUE</span><span class="ph-title">Custom Text Replies</span></div>
+      <span class="ph-meta" style="color:var(--ac2);font-weight:600">${customReplies.length} custom · ${customReplies.length+102} total</span>
+    </div>
+    <form class="irow" method="POST" action="/api/replies/add">
+      <input class="ifield" type="text" name="word" placeholder="Add new message to the loop pool…" autocomplete="off" required/>
+      <button class="btn-add" type="submit">＋ Add</button>
+    </form>
+    <div class="ql">${textQueueRows}</div>
+  </div>
+
+  <!-- IMAGE URL MANAGER -->
+  <div class="slabel">🖼 Image URL Pool</div>
+  <div class="panel">
+    <div class="ph">
+      <div class="ph-l"><span class="pbadge pbadge-p">IMAGES</span><span class="ph-title">Custom Image URLs for Loop</span></div>
+      <span class="ph-meta" style="color:var(--pu2);font-weight:600">${imageReplies.length} custom URLs</span>
+    </div>
+    <form class="irow" method="POST" action="/api/images/add">
+      <input class="ifield" type="url" name="url" placeholder="https://example.com/image.jpg" autocomplete="off" required/>
+      <button class="btn-add" type="submit">＋ Add</button>
+    </form>
+    <div class="ql">${imgRows}</div>
+  </div>
+
+  <!-- COMMAND REFERENCE -->
+  <div class="slabel">📟 Command Reference</div>
+  <div class="panel">
+    <div class="ph">
+      <div class="ph-l"><span class="pbadge pbadge-p">DOCS</span><span class="ph-title">Available Commands</span></div>
+      <span class="ph-meta">prefix: <b style="color:var(--ac2)">!</b> &nbsp;|&nbsp; loop trigger: <b style="color:var(--gn2)">. (dot)</b></span>
+    </div>
+    <table>
+      <thead><tr><th style="width:200px">Command</th><th>Description</th></tr></thead>
+      <tbody>${cmdRows}</tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    <span>czb::panel v2.1 &nbsp;·&nbsp; node.js &nbsp;·&nbsp; ws3-fca</span>
+    <div class="footer-r"><div class="sdot"></div><span>auto-refresh every 10s</span></div>
+  </div>
+
+</main>
 </div>
 </body>
 </html>`;
 }
 
 function parseBody(req) {
-    return new Promise((resolve) => {
-        let body = "";
-        req.on("data", chunk => { body += chunk.toString(); });
-        req.on("end", () => {
-            const params = {};
-            body.split("&").forEach(pair => {
-                const [k, v] = pair.split("=");
-                if (k) params[decodeURIComponent(k.replace(/\+/g," "))] = decodeURIComponent((v||"").replace(/\+/g," "));
+    return new Promise(resolve=>{
+        let body="";
+        req.on("data",c=>{body+=c.toString()});
+        req.on("end",()=>{
+            const p={};
+            body.split("&").forEach(pair=>{
+                const [k,v]=pair.split("=");
+                if(k) p[decodeURIComponent(k.replace(/\+/g," "))]=decodeURIComponent((v||"").replace(/\+/g," "));
             });
-            resolve(params);
+            resolve(p);
         });
     });
 }
 
-function startDashboard(port = 5000) {
-    const server = http.createServer(async (req, res) => {
+function startDashboard(port=5000) {
+    const server = http.createServer(async(req,res)=>{
         try {
-            if (req.url === "/api/state" && req.method === "GET") {
-                res.writeHead(200, { "Content-Type": "application/json" });
-                res.end(JSON.stringify({ logs, state }));
-                return;
+            // State JSON
+            if (req.url==="/api/state"&&req.method==="GET") {
+                res.writeHead(200,{"Content-Type":"application/json"});
+                res.end(JSON.stringify({logs,state})); return;
             }
 
-            if (req.url === "/api/replies/add" && req.method === "POST") {
-                const params = await parseBody(req);
-                const word = (params.word || "").trim();
-                if (word) {
-                    const arr = readCustomReplies();
-                    arr.push(word);
-                    writeCustomReplies(arr);
-                }
-                res.writeHead(302, { Location: "/" });
-                res.end();
-                return;
+            // Add text reply
+            if (req.url==="/api/replies/add"&&req.method==="POST") {
+                const p=await parseBody(req);
+                const w=(p.word||"").trim();
+                if(w){ const a=readCustomReplies(); a.push(w); writeCustomReplies(a); }
+                res.writeHead(302,{Location:"/"}); res.end(); return;
             }
 
-            if (req.url === "/api/config/save" && req.method === "POST") {
-                const params = await parseBody(req);
-                const cfg = readBotConfig();
-                if (params.loopReact !== undefined)        cfg.loopReact          = params.loopReact.trim() || "😆";
-                if (params.loopDelay !== undefined)        cfg.loopDelay          = Math.max(1, parseInt(params.loopDelay) || 5);
-                if (params.imageProbability !== undefined) cfg.imageProbability   = Math.min(100, Math.max(0, parseInt(params.imageProbability) || 20));
-                if (params.loopMode !== undefined)         cfg.loopMode           = ["sequential","shuffle"].includes(params.loopMode) ? params.loopMode : "sequential";
-                if (params.loopStartMsg !== undefined)     cfg.loopStartMsg       = params.loopStartMsg.trim();
-                if (params.loopStopMsg !== undefined)      cfg.loopStopMsg        = params.loopStopMsg.trim();
-                if (params.maxLoopCount !== undefined)     cfg.maxLoopCount       = Math.max(0, parseInt(params.maxLoopCount) || 0);
-                if (params.autoStopMinutes !== undefined)  cfg.autoStopMinutes    = Math.max(0, parseInt(params.autoStopMinutes) || 0);
-                if (params.ttsLang !== undefined)          cfg.ttsLang            = params.ttsLang.trim() || "tl";
-                cfg.reactOnlyMode  = params.reactOnlyMode === "1";
+            // Remove text reply
+            if (req.url==="/api/replies/remove"&&req.method==="POST") {
+                const p=await parseBody(req);
+                const idx=parseInt(p.index);
+                if(!isNaN(idx)){ const a=readCustomReplies(); if(idx>=0&&idx<a.length)a.splice(idx,1); writeCustomReplies(a); }
+                res.writeHead(302,{Location:"/"}); res.end(); return;
+            }
 
-                // PM loop
-                if (params.pmLoopReact !== undefined)      cfg.pmLoopReact        = params.pmLoopReact.trim() || "❤️";
-                if (params.pmLoopDelay !== undefined)      cfg.pmLoopDelay        = Math.max(3, parseInt(params.pmLoopDelay) || 10);
-                if (params.pmLoopMode !== undefined)       cfg.pmLoopMode         = ["sequential","shuffle"].includes(params.pmLoopMode) ? params.pmLoopMode : "shuffle";
-                cfg.pmSearchEnabled = params.pmSearchEnabled === "1";
-                if (params.pmSearchSource !== undefined)   cfg.pmSearchSource     = params.pmSearchSource.trim() || "quotes";
-                if (params.pmSearchCategory !== undefined) cfg.pmSearchCategory   = params.pmSearchCategory.trim() || "inspirational";
-                if (params.pmSearchPrefix !== undefined)   cfg.pmSearchPrefix     = params.pmSearchPrefix.trim();
-                if (params.pmSearchSuffix !== undefined)   cfg.pmSearchSuffix     = params.pmSearchSuffix.trim();
-                cfg.typingSimulate = params.typingSimulate === "1";
+            // Add image URL
+            if (req.url==="/api/images/add"&&req.method==="POST") {
+                const p=await parseBody(req);
+                const u=(p.url||"").trim();
+                if(u&&u.startsWith("http")){ const a=readImageReplies(); a.push(u); writeImageReplies(a); }
+                res.writeHead(302,{Location:"/"}); res.end(); return;
+            }
 
-                // General
-                cfg.greetNewMembers  = params.greetNewMembers === "1";
-                if (params.greetMsg !== undefined)         cfg.greetMsg           = params.greetMsg.trim() || "Welcome! 👋";
-                cfg.antiSpamEnabled  = params.antiSpamEnabled === "1";
-                if (params.antiSpamMaxMsg !== undefined)   cfg.antiSpamMaxMsg     = Math.max(2, parseInt(params.antiSpamMaxMsg) || 5);
-                if (params.antiSpamWindowSec !== undefined) cfg.antiSpamWindowSec = Math.max(3, parseInt(params.antiSpamWindowSec) || 10);
-                cfg.autoSeenEnabled  = params.autoSeenEnabled === "1";
+            // Remove image URL
+            if (req.url==="/api/images/remove"&&req.method==="POST") {
+                const p=await parseBody(req);
+                const idx=parseInt(p.index);
+                if(!isNaN(idx)){ const a=readImageReplies(); if(idx>=0&&idx<a.length)a.splice(idx,1); writeImageReplies(a); }
+                res.writeHead(302,{Location:"/"}); res.end(); return;
+            }
 
+            // Save bot config
+            if (req.url==="/api/config/save"&&req.method==="POST") {
+                const p=await parseBody(req);
+                const cfg=readBotConfig();
+                if(p.loopReact!==undefined)        cfg.loopReact         = p.loopReact.trim()||"😆";
+                if(p.loopDelay!==undefined)        cfg.loopDelay         = Math.max(1,parseInt(p.loopDelay)||5);
+                if(p.imageProbability!==undefined) cfg.imageProbability  = Math.min(100,Math.max(0,parseInt(p.imageProbability)||20));
+                if(p.loopMode!==undefined)         cfg.loopMode          = ["sequential","shuffle"].includes(p.loopMode)?p.loopMode:"sequential";
+                if(p.loopStartMsg!==undefined)     cfg.loopStartMsg      = p.loopStartMsg.trim();
+                if(p.loopStopMsg!==undefined)      cfg.loopStopMsg       = p.loopStopMsg.trim();
+                if(p.maxLoopCount!==undefined)     cfg.maxLoopCount      = Math.max(0,parseInt(p.maxLoopCount)||0);
+                if(p.autoStopMinutes!==undefined)  cfg.autoStopMinutes   = Math.max(0,parseInt(p.autoStopMinutes)||0);
+                if(p.ttsLang!==undefined)          cfg.ttsLang           = p.ttsLang.trim()||"tl";
+                cfg.reactOnlyMode    = p.reactOnlyMode==="1";
+                cfg.greetNewMembers  = p.greetNewMembers==="1";
+                if(p.greetMsg!==undefined)         cfg.greetMsg          = p.greetMsg.trim()||"Welcome! 👋";
+                cfg.antiSpamEnabled  = p.antiSpamEnabled==="1";
+                if(p.antiSpamMaxMsg!==undefined)   cfg.antiSpamMaxMsg    = Math.max(2,parseInt(p.antiSpamMaxMsg)||5);
+                if(p.antiSpamWindowSec!==undefined)cfg.antiSpamWindowSec = Math.max(3,parseInt(p.antiSpamWindowSec)||10);
+                cfg.autoSeenEnabled  = p.autoSeenEnabled==="1";
+                cfg.typingSimulate   = p.typingSimulate==="1";
                 writeBotConfig(cfg);
-                res.writeHead(302, { Location: "/" });
-                res.end();
-                return;
+                res.writeHead(302,{Location:"/"}); res.end(); return;
             }
 
-            if (req.url === "/api/replies/remove" && req.method === "POST") {
-                const params = await parseBody(req);
-                const idx = parseInt(params.index);
-                if (!isNaN(idx)) {
-                    const arr = readCustomReplies();
-                    if (idx >= 0 && idx < arr.length) arr.splice(idx, 1);
-                    writeCustomReplies(arr);
+            // Update fbstate (cookie)
+            if (req.url==="/api/fbstate/update"&&req.method==="POST") {
+                const p=await parseBody(req);
+                const raw=(p.fbstate||"").trim();
+                let parsed;
+                try { parsed=JSON.parse(raw); }
+                catch(e) {
+                    res.writeHead(200,{"Content-Type":"text/html"});
+                    res.end(`<!DOCTYPE html><html><body style="background:#080a12;color:#ef4444;font-family:monospace;padding:40px"><h3>❌ Invalid JSON</h3><p>${String(e)}</p><br><a href="/" style="color:#7b8ff7">← Go back</a></body></html>`);
+                    return;
                 }
-                res.writeHead(302, { Location: "/" });
-                res.end();
-                return;
+                if (!Array.isArray(parsed)) {
+                    res.writeHead(200,{"Content-Type":"text/html"});
+                    res.end(`<!DOCTYPE html><html><body style="background:#080a12;color:#ef4444;font-family:monospace;padding:40px"><h3>❌ fbstate must be a JSON array</h3><br><a href="/" style="color:#7b8ff7">← Go back</a></body></html>`);
+                    return;
+                }
+                fs.writeFileSync(FBSTATE_FILE,JSON.stringify(parsed,null,2),"utf8");
+                addLog("info","fbstate updated from dashboard — bot will reconnect shortly.");
+                res.writeHead(302,{Location:"/"}); res.end(); return;
             }
 
+            // Main page
             let html;
-            try { html = buildHTML(); }
-            catch (e) {
-                html = `<!DOCTYPE html><html><body style="background:#07080d;color:#ef4444;font-family:monospace;padding:40px">
-                    <h2>Render error</h2><pre>${String(e)}</pre>
-                    <meta http-equiv="refresh" content="5"/></body></html>`;
+            try { html=buildHTML(); }
+            catch(e) {
+                html=`<!DOCTYPE html><html><body style="background:#080a12;color:#ef4444;font-family:monospace;padding:40px"><h2>Render error</h2><pre>${String(e)}</pre><meta http-equiv="refresh" content="5"/></body></html>`;
             }
-            res.writeHead(200, { "Content-Type": "text/html" });
+            res.writeHead(200,{"Content-Type":"text/html"});
             res.end(html);
-        } catch (e) {
-            try { res.writeHead(500); res.end("Server error"); } catch(_) {}
+        } catch(e) {
+            try{res.writeHead(500);res.end("Server error");}catch(_){}
         }
     });
 
-    server.on("error", err => console.error("[cozy-bot] Dashboard error:", err));
-    server.listen(port, "0.0.0.0", () => console.log(`[cozy-bot] Dashboard running on port ${port}`));
+    server.on("error",err=>console.error("[cozy-bot] Dashboard error:",err));
+    server.listen(port,"0.0.0.0",()=>console.log(`[cozy-bot] Dashboard running on port ${port}`));
 }
 
 module.exports = { startDashboard, addLog, state };
