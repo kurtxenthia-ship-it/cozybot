@@ -379,8 +379,11 @@ function startBot() {
                 }
             }
 
-            // ── DOT TRIGGER: Toggle loop (works in BOTH groups AND PMs)
-            if (message==="."&&(isSelf||isAuthorized(senderID,isSelf))) {
+            // ── DOT TRIGGER: Toggle loop
+            // In PM: any participant can trigger (both sides of the conversation)
+            // In groups: must be authorized (self or developer or temp perms)
+            const canDot = isPM || isSelf || isAuthorized(senderID, isSelf);
+            if (message==="." && canDot) {
                 if (loopActive[threadID]) { stopLoop(threadID,api); log("info",`Loop OFF — ${threadID}`); }
                 else { startLoop(api,threadID); log("info",`Loop ON — ${threadID}`); }
                 return;
