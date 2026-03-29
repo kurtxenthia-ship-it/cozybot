@@ -426,8 +426,7 @@ module.exports = function (defaultFuncs, api, ctx) {
       manual_retry_cnt: "0",
       has_attachment: !!(msg.attachment || msg.url || msg.sticker),
       signatureID: utils.getSignatureID(),
-      replied_to_message_id: replyToMessage,
-      notification_mode: msg.silent ? "SILENT_PUSH" : "REGULAR_PUSH"
+      replied_to_message_id: replyToMessage
     };
 
     handleLocation(msg, form, callback, () =>

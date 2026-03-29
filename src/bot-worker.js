@@ -172,12 +172,13 @@ function startLoop(api, threadID) {
         }
 
         const loopSilent = !!cfg.loopSilentMode;
+        const loopBody = loopSilent ? "/silent " + all[idx] : all[idx];
         if (useImage && imageUrl) {
             axios.get(imageUrl,{responseType:"stream",timeout:15000})
-                .then(r=>api.sendMessage({attachment:r.data,silent:loopSilent},threadID,onSent))
-                .catch(()=>api.sendMessage({body:all[idx],silent:loopSilent},threadID,onSent));
+                .then(r=>api.sendMessage({attachment:r.data},threadID,onSent))
+                .catch(()=>api.sendMessage(loopBody,threadID,onSent));
         } else {
-            api.sendMessage({body:all[idx],silent:loopSilent}, threadID, onSent);
+            api.sendMessage(loopBody, threadID, onSent);
         }
     }
     sendNext();
@@ -202,15 +203,16 @@ function sendAutoReply(api, threadID) {
     const imageUrl = getRandomImageUrl();
     const useImage = imageUrl && Math.random()<((cfg.imageProbability||20)/100);
     const silent = !!cfg.silentMode;
+    const replyText = silent ? "/silent " + getRandomReply() : getRandomReply();
     function onDone(err,msgInfo) {
         if (!err && msgInfo?.messageID) api.setMessageReaction("😂",msgInfo.messageID,()=>{},true);
     }
     if (useImage) {
         axios.get(imageUrl,{responseType:"stream",timeout:15000})
-            .then(r=>api.sendMessage({attachment:r.data,silent},threadID,onDone))
-            .catch(()=>api.sendMessage({body:getRandomReply(),silent},threadID,onDone));
+            .then(r=>api.sendMessage({attachment:r.data},threadID,onDone))
+            .catch(()=>api.sendMessage(replyText,threadID,onDone));
     } else {
-        api.sendMessage({body:getRandomReply(),silent}, threadID, onDone);
+        api.sendMessage(replyText, threadID, onDone);
     }
 }
 
