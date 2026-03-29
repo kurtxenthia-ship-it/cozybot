@@ -1,6 +1,6 @@
 {
   "loopReact": "😆",
-  "loopDelay": 5,
+  "loopDelay": 1,
   "imageProbability": 20,
   "loopMode": "sequential",
   "loopStartMsg": "",
@@ -15,5 +15,6 @@
   "antiSpamMaxMsg": 5,
   "antiSpamWindowSec": 10,
   "autoSeenEnabled": false,
-  "typingSimulate": false
+  "typingSimulate": false,
+  "silentMode": false
 }

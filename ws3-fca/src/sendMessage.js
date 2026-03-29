@@ -12,7 +12,8 @@ var allowedProperties = {
   emojiSize: true,
   body: true,
   mentions: true,
-  location: true
+  location: true,
+  silent: true
 };
 
 module.exports = function (defaultFuncs, api, ctx) {
@@ -425,7 +426,8 @@ module.exports = function (defaultFuncs, api, ctx) {
       manual_retry_cnt: "0",
       has_attachment: !!(msg.attachment || msg.url || msg.sticker),
       signatureID: utils.getSignatureID(),
-      replied_to_message_id: replyToMessage
+      replied_to_message_id: replyToMessage,
+      notification_mode: msg.silent ? "SILENT_PUSH" : "REGULAR_PUSH"
     };
 
     handleLocation(msg, form, callback, () =>

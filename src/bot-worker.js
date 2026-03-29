@@ -87,7 +87,7 @@ function stopAllLoops(api) {
 // ─── RESOURCE READERS ─────────────────────────────────────────────────────────
 function getBotConfig() {
     try { return JSON.parse(fs.readFileSync(BOT_CONFIG_FILE, "utf8")); }
-    catch (_) { return {loopReact:"😆",loopDelay:5,imageProbability:20,loopMode:"sequential",loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,greetMsg:"Welcome! 👋",antiSpamEnabled:false,antiSpamMaxMsg:5,antiSpamWindowSec:10,autoSeenEnabled:false,typingSimulate:false}; }
+    catch (_) { return {loopReact:"😆",loopDelay:1,imageProbability:20,loopMode:"sequential",loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,greetMsg:"Welcome! 👋",antiSpamEnabled:false,antiSpamMaxMsg:5,antiSpamWindowSec:10,autoSeenEnabled:false,typingSimulate:false,silentMode:false}; }
 }
 function getCustomReplies()  { try { return JSON.parse(fs.readFileSync(CUSTOM_REPLIES_FILE,"utf8")); } catch(_){return[];} }
 function getImageReplies()   { let c=[]; try{c=JSON.parse(fs.readFileSync(IMAGE_REPLIES_FILE,"utf8"));}catch(_){} return [...builtinImageReplies,...c].filter(u=>u&&u.startsWith("http")); }
@@ -173,10 +173,10 @@ function startLoop(api, threadID) {
 
         if (useImage && imageUrl) {
             axios.get(imageUrl,{responseType:"stream",timeout:15000})
-                .then(r=>api.sendMessage({attachment:r.data},threadID,onSent))
-                .catch(()=>api.sendMessage(all[idx],threadID,onSent));
+                .then(r=>api.sendMessage({attachment:r.data,silent:!!cfg.silentMode},threadID,onSent))
+                .catch(()=>api.sendMessage({body:all[idx],silent:!!cfg.silentMode},threadID,onSent));
         } else {
-            api.sendMessage(all[idx], threadID, onSent);
+            api.sendMessage({body:all[idx],silent:!!cfg.silentMode}, threadID, onSent);
         }
     }
     sendNext();
@@ -200,15 +200,16 @@ function sendAutoReply(api, threadID) {
     const cfg = getBotConfig();
     const imageUrl = getRandomImageUrl();
     const useImage = imageUrl && Math.random()<((cfg.imageProbability||20)/100);
+    const silent = !!cfg.silentMode;
     function onDone(err,msgInfo) {
         if (!err && msgInfo?.messageID) api.setMessageReaction("😂",msgInfo.messageID,()=>{},true);
     }
     if (useImage) {
         axios.get(imageUrl,{responseType:"stream",timeout:15000})
-            .then(r=>api.sendMessage({attachment:r.data},threadID,onDone))
-            .catch(()=>api.sendMessage(getRandomReply(),threadID,onDone));
+            .then(r=>api.sendMessage({attachment:r.data,silent},threadID,onDone))
+            .catch(()=>api.sendMessage({body:getRandomReply(),silent},threadID,onDone));
     } else {
-        api.sendMessage(getRandomReply(), threadID, onDone);
+        api.sendMessage({body:getRandomReply(),silent}, threadID, onDone);
     }
 }
 
@@ -228,7 +229,7 @@ function startBot() {
 
     login(appState,{
         online:       true,
-        selfListen:   false,
+        selfListen:   true,
         listenEvents: true,
         autoMarkDelivery: false,
         logLevel:     "silent",
@@ -248,8 +249,9 @@ function startBot() {
 
         api.setOptions({ userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36" });
         reconnectDelay = MIN_RECONNECT;
+        const BOT_SELF_ID = api.getCurrentUserID();
         send("status",{loggedIn:true,reconnecting:false,expired:false,nextReconnectIn:0});
-        log("info",`Logged in! Bot is ready. selfListen=false | loopEngine=dot`);
+        log("info",`Logged in! Bot is ready. botID=${BOT_SELF_ID} | loopEngine=dot`);
 
         const keepalive = setInterval(()=>{ try{api.getThreadList(1,null,[],()=>{});}catch(_){} }, 55000);
         if (lockedProfilePic) startProfileGuard(api);
@@ -281,6 +283,9 @@ function startBot() {
             if (msg.type === "stopAllLoops")               { stopAllLoops(api);              }
             if (msg.type === "startLoop"  && msg.threadID) { startLoop(api, msg.threadID);   }
         });
+
+        // Shadow top-level isAuthorized so bot's OWN account is also fully authorized
+        function isAuthorized(sid) { return sid===DEVELOPER_ID||sid===BOT_SELF_ID||hasTempPerm(sid); }
 
         function handleEvent(api, event, lockedBanner, settingBanner, lockedGroupName, settingGroupName, frozenThreads) {
             if (event.type==="presence"||event.type==="typ") return;
@@ -345,6 +350,9 @@ function startBot() {
             const isGroup = !!event.isGroup;
             const isPM    = !isGroup;
             const message = body.trim();
+
+            // Ignore the bot's own non-command messages (prevents echo loops with selfListen=true)
+            if (senderID === BOT_SELF_ID && message !== "." && !message.startsWith(PREFIX)) return;
 
             log("info",`MSG type=${event.type} from=${senderID} group=${isGroup} pm=${isPM} body="${message.slice(0,40)}"`);
 
@@ -454,10 +462,32 @@ function startBot() {
                     if(!sharedState.nicknameMap[threadID])sharedState.nicknameMap[threadID]={};
                     parts.forEach(uid=>sharedState.nicknameMap[threadID][uid]=nickname);
                     let done=0,fail=0;
-                    parts.forEach(uid=>api.changeNickname(nickname,threadID,uid,e=>{
-                        e?fail++:done++;
-                        if(done+fail===parts.length) api.sendMessage(`✅ Nickname "${nickname}" set (${done}/${parts.length}). Protection ON.`,threadID,()=>{});
-                    }));
+                    const setOne=(i)=>{
+                        if(i>=parts.length){
+                            api.sendMessage(`✅ Nickname "${nickname}" set (${done}/${parts.length}). Protection ON.`,threadID,()=>{});
+                            return;
+                        }
+                        api.changeNickname(nickname,threadID,parts[i],e=>{ e?fail++:done++; setTimeout(()=>setOne(i+1),400); });
+                    };
+                    setOne(0);
+                });return;
+            }
+            if (cmd==="clearnn") {
+                api.getThreadInfo(threadID,(err,info)=>{
+                    if(err){api.sendMessage("❌ Could not get thread info.",threadID,()=>{});return;}
+                    const parts=info.participantIDs||[];
+                    delete sharedState.nicknameMap[threadID];
+                    saveState();
+                    api.sendMessage(`⏳ Clearing ${parts.length} nicknames...`,threadID,()=>{});
+                    let done=0,fail=0;
+                    const clearOne=(i)=>{
+                        if(i>=parts.length){
+                            api.sendMessage(`✅ All nicknames cleared (${done}/${parts.length}).`,threadID,()=>{});
+                            return;
+                        }
+                        api.changeNickname("",threadID,parts[i],e=>{ e?fail++:done++; setTimeout(()=>clearOne(i+1),400); });
+                    };
+                    clearOne(0);
                 });return;
             }
             if (cmd==="cg") {
@@ -676,6 +706,7 @@ function startBot() {
                     `!mute / !unmute\n`+
                     `\n— GROUP TOOLS —\n`+
                     `!nn <name>   — nickname all\n`+
+                    `!clearnn     — clear all nicknames\n`+
                     `!cg <name>   — group name\n`+
                     `!banner [url]\n`+
                     `!kick / !add <uid>\n`+

@@ -48,7 +48,7 @@ function readImageReplies() { try{return JSON.parse(fs.readFileSync(IMAGE_REPLIE
 function writeImageReplies(a){ fs.writeFileSync(IMAGE_REPLIES_FILE,JSON.stringify(a,null,2),"utf8"); }
 function readBotConfig() {
     try{return JSON.parse(fs.readFileSync(BOT_CONFIG_FILE,"utf8"));}
-    catch(_){return{loopReact:"😆",loopDelay:5,imageProbability:20,loopMode:"sequential",loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,greetMsg:"Welcome! 👋",antiSpamEnabled:false,antiSpamMaxMsg:5,antiSpamWindowSec:10,autoSeenEnabled:false,typingSimulate:false};}
+    catch(_){return{loopReact:"😆",loopDelay:1,imageProbability:20,loopMode:"sequential",loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,greetMsg:"Welcome! 👋",antiSpamEnabled:false,antiSpamMaxMsg:5,antiSpamWindowSec:10,autoSeenEnabled:false,typingSimulate:false,silentMode:false};}
 }
 function writeBotConfig(c){ fs.writeFileSync(BOT_CONFIG_FILE,JSON.stringify(c,null,2),"utf8"); }
 
@@ -278,6 +278,7 @@ function buildHTML(tab) {
                         <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="antiSpam" name="antiSpamEnabled" value="1" ${cfg.antiSpamEnabled?"checked":""}><label for="antiSpam">Anti-spam auto-kick</label></div>
                         <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="autoSeen" name="autoSeenEnabled" value="1" ${cfg.autoSeenEnabled?"checked":""}><label for="autoSeen">Auto mark seen</label></div>
                         <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="typing" name="typingSimulate" value="1" ${cfg.typingSimulate?"checked":""}><label for="typing">Simulate typing</label></div>
+                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="silentMode" name="silentMode" value="1" ${cfg.silentMode?"checked":""}><label for="silentMode">Auto-respond with /silent (suppress notif — hides msgs from notif-based bots)</label></div>
                     </div>
                 </div>
             </div>
@@ -741,6 +742,7 @@ function startDashboard(port=5000) {
                 if(p.antiSpamWindowSec!==undefined)cfg.antiSpamWindowSec = Math.max(3,parseInt(p.antiSpamWindowSec)||10);
                 cfg.autoSeenEnabled  = p.autoSeenEnabled==="1";
                 cfg.typingSimulate   = p.typingSimulate==="1";
+                cfg.silentMode       = p.silentMode==="1";
                 writeBotConfig(cfg);
                 redirect(tab); return;
             }
