@@ -16,5 +16,6 @@
   "antiSpamWindowSec": 10,
   "autoSeenEnabled": false,
   "typingSimulate": false,
-  "silentMode": false
+  "silentMode": false,
+  "loopSilentMode": false
 }

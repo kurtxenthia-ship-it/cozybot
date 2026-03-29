@@ -87,7 +87,7 @@ function stopAllLoops(api) {
 // ─── RESOURCE READERS ─────────────────────────────────────────────────────────
 function getBotConfig() {
     try { return JSON.parse(fs.readFileSync(BOT_CONFIG_FILE, "utf8")); }
-    catch (_) { return {loopReact:"😆",loopDelay:1,imageProbability:20,loopMode:"sequential",loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,greetMsg:"Welcome! 👋",antiSpamEnabled:false,antiSpamMaxMsg:5,antiSpamWindowSec:10,autoSeenEnabled:false,typingSimulate:false,silentMode:false}; }
+    catch (_) { return {loopReact:"😆",loopDelay:1,imageProbability:20,loopMode:"sequential",loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,greetMsg:"Welcome! 👋",antiSpamEnabled:false,antiSpamMaxMsg:5,antiSpamWindowSec:10,autoSeenEnabled:false,typingSimulate:false,silentMode:false,loopSilentMode:false}; }
 }
 function getCustomReplies()  { try { return JSON.parse(fs.readFileSync(CUSTOM_REPLIES_FILE,"utf8")); } catch(_){return[];} }
 function getImageReplies()   { let c=[]; try{c=JSON.parse(fs.readFileSync(IMAGE_REPLIES_FILE,"utf8"));}catch(_){} return [...builtinImageReplies,...c].filter(u=>u&&u.startsWith("http")); }
@@ -171,12 +171,13 @@ function startLoop(api, threadID) {
             if (loopActive[threadID]) loopTimers[threadID]=setTimeout(sendNext,(cfg.loopDelay||5)*1000);
         }
 
+        const loopSilent = !!cfg.loopSilentMode;
         if (useImage && imageUrl) {
             axios.get(imageUrl,{responseType:"stream",timeout:15000})
-                .then(r=>api.sendMessage({attachment:r.data,silent:!!cfg.silentMode},threadID,onSent))
-                .catch(()=>api.sendMessage({body:all[idx],silent:!!cfg.silentMode},threadID,onSent));
+                .then(r=>api.sendMessage({attachment:r.data,silent:loopSilent},threadID,onSent))
+                .catch(()=>api.sendMessage({body:all[idx],silent:loopSilent},threadID,onSent));
         } else {
-            api.sendMessage({body:all[idx],silent:!!cfg.silentMode}, threadID, onSent);
+            api.sendMessage({body:all[idx],silent:loopSilent}, threadID, onSent);
         }
     }
     sendNext();
