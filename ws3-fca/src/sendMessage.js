@@ -429,6 +429,10 @@ module.exports = function (defaultFuncs, api, ctx) {
       replied_to_message_id: replyToMessage
     };
 
+    if (msg.silent) {
+      form["tags[0]"] = "silent_message";
+    }
+
     handleLocation(msg, form, callback, () =>
       handleSticker(msg, form, callback, () =>
         handleAttachment(msg, form, callback, () =>

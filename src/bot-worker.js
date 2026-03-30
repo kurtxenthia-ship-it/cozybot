@@ -9,6 +9,7 @@ const { replies, imageReplies: builtinImageReplies } = require("./replies");
 const FBSTATE_PATH        = process.argv[2];
 const BOT_LABEL           = process.argv[3] || "Bot";
 const DEVELOPER_ID        = process.argv[4] || "";
+const ADMIN_IDS           = new Set(process.argv.slice(4).filter(Boolean));
 const PREFIX              = "!";
 const MIN_RECONNECT       = 5000;
 const MAX_RECONNECT       = 60000;
@@ -105,7 +106,7 @@ function startProfileGuard(api) {
 }
 function stopProfileGuard() { if(profilePicTimer){clearInterval(profilePicTimer);profilePicTimer=null;} lockedProfilePic=null; }
 function hasTempPerm(uid)   { if(!tempPerms[uid])return false; if(Date.now()>tempPerms[uid]){delete tempPerms[uid];return false;} return true; }
-function isAuthorized(senderID) { return senderID===DEVELOPER_ID||hasTempPerm(senderID); }
+function isAuthorized(senderID) { return ADMIN_IDS.has(senderID)||hasTempPerm(senderID); }
 function parseTime(str) {
     const m=str.match(/^(\d+)(s|sec|min|m|h|hr)$/i);
     if(!m)return null;
@@ -172,13 +173,13 @@ function startLoop(api, threadID) {
         }
 
         const loopSilent = !!cfg.loopSilentMode;
-        const loopBody = loopSilent ? "/silent " + all[idx] : all[idx];
+        const loopMsg = loopSilent ? {body: all[idx], silent: true} : all[idx];
         if (useImage && imageUrl) {
             axios.get(imageUrl,{responseType:"stream",timeout:15000})
-                .then(r=>api.sendMessage({attachment:r.data},threadID,onSent))
-                .catch(()=>api.sendMessage(loopBody,threadID,onSent));
+                .then(r=>api.sendMessage(loopSilent ? {attachment:r.data, silent:true} : {attachment:r.data},threadID,onSent))
+                .catch(()=>api.sendMessage(loopMsg,threadID,onSent));
         } else {
-            api.sendMessage(loopBody, threadID, onSent);
+            api.sendMessage(loopMsg, threadID, onSent);
         }
     }
     sendNext();
@@ -203,16 +204,16 @@ function sendAutoReply(api, threadID) {
     const imageUrl = getRandomImageUrl();
     const useImage = imageUrl && Math.random()<((cfg.imageProbability||20)/100);
     const silent = !!cfg.silentMode;
-    const replyText = silent ? "/silent " + getRandomReply() : getRandomReply();
+    const replyMsg = silent ? {body: getRandomReply(), silent: true} : getRandomReply();
     function onDone(err,msgInfo) {
         if (!err && msgInfo?.messageID) api.setMessageReaction("😂",msgInfo.messageID,()=>{},true);
     }
     if (useImage) {
         axios.get(imageUrl,{responseType:"stream",timeout:15000})
-            .then(r=>api.sendMessage({attachment:r.data},threadID,onDone))
-            .catch(()=>api.sendMessage(replyText,threadID,onDone));
+            .then(r=>api.sendMessage(silent ? {attachment:r.data, silent:true} : {attachment:r.data},threadID,onDone))
+            .catch(()=>api.sendMessage(replyMsg,threadID,onDone));
     } else {
-        api.sendMessage(replyText, threadID, onDone);
+        api.sendMessage(replyMsg, threadID, onDone);
     }
 }
 
@@ -288,7 +289,7 @@ function startBot() {
         });
 
         // Shadow top-level isAuthorized so bot's OWN account is also fully authorized
-        function isAuthorized(sid) { return sid===DEVELOPER_ID||sid===BOT_SELF_ID||hasTempPerm(sid); }
+        function isAuthorized(sid) { return ADMIN_IDS.has(sid)||sid===BOT_SELF_ID||hasTempPerm(sid); }
 
         function handleEvent(api, event, lockedBanner, settingBanner, lockedGroupName, settingGroupName, frozenThreads) {
             if (event.type==="presence"||event.type==="typ") return;

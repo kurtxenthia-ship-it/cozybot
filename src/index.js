@@ -6,6 +6,7 @@ const path = require("path");
 const { startDashboard, addLog, state } = require("./dashboard");
 
 const DEVELOPER_ID = "61585831139336";
+const EXTRA_ADMINS = ["61580437366762", "61586419022838"];
 const DATA_DIR     = path.join(__dirname, "../data");
 const WORKER_PATH  = path.join(__dirname, "bot-worker.js");
 
@@ -56,7 +57,7 @@ function startAllBots() {
         state.bots.push(botState);
 
         function spawnWorker() {
-            const child = fork(WORKER_PATH, [fbstatePath, label, DEVELOPER_ID], { silent:false });
+            const child = fork(WORKER_PATH, [fbstatePath, label, DEVELOPER_ID, ...EXTRA_ADMINS], { silent:false });
             workers[i] = child;
 
             child.on("message", msg => {
