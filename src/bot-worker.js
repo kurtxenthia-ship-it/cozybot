@@ -45,9 +45,11 @@ function loadState() {
             nicknameMap:        s.nicknameMap         || {},
             antiRestrict:       s.antiRestrict        || false,
             antiChat:           s.antiChat            || {},
+            lockedBanners:      s.lockedBanners       || {},
+            lockedGroupNames:   s.lockedGroupNames    || {},
         };
     } catch (_) {
-        return { loopEnabled:{}, autoRespondEnabled:{}, mutedThreads:{}, nicknameMap:{}, antiRestrict:false, antiChat:{} };
+        return { loopEnabled:{}, autoRespondEnabled:{}, mutedThreads:{}, nicknameMap:{}, antiRestrict:false, antiChat:{}, lockedBanners:{}, lockedGroupNames:{} };
     }
 }
 function saveState() {
@@ -59,6 +61,8 @@ function saveState() {
             nicknameMap:        sharedState.nicknameMap,
             antiRestrict:       sharedState.antiRestrict,
             antiChat:           sharedState.antiChat,
+            lockedBanners:      sharedState.lockedBanners,
+            lockedGroupNames:   sharedState.lockedGroupNames,
         }, null, 2));
     } catch (_) {}
 }
@@ -69,14 +73,16 @@ let reconnectDelay  = MIN_RECONNECT;
 let lockedProfilePic= null;
 let profilePicTimer = null;
 const tempPerms     = {};
-const loopActive    = {};  // threadID → true/false
-const loopTimers    = {};  // threadID → setTimeout handle
-const loopIndex     = {};  // sequential index
-const loopCounts    = {};  // messages sent this run
-const loopAutoStop  = {};  // auto-stop handles
-const spamTracker   = {};  // anti-spam per sender
+const loopActive    = {};
+const loopTimers    = {};
+const loopIndex     = {};
+const loopCounts    = {};
+const loopAutoStop  = {};
+const spamTracker   = {};
+const settingBanner     = {};
+const settingGroupName  = {};
 
-// ─── STOP ALL LOOPS (called on disconnect / IPC command) ──────────────────────
+// ─── STOP ALL LOOPS ───────────────────────────────────────────────────────────
 function stopAllLoops(api) {
     const active = Object.keys(loopActive).filter(t => loopActive[t]);
     if (!active.length) return;
@@ -88,7 +94,17 @@ function stopAllLoops(api) {
 // ─── RESOURCE READERS ─────────────────────────────────────────────────────────
 function getBotConfig() {
     try { return JSON.parse(fs.readFileSync(BOT_CONFIG_FILE, "utf8")); }
-    catch (_) { return {loopReact:"😆",loopDelay:1,imageProbability:20,loopMode:"sequential",loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,greetMsg:"Welcome! 👋",antiSpamEnabled:false,antiSpamMaxMsg:5,antiSpamWindowSec:10,autoSeenEnabled:false,typingSimulate:false,silentMode:false,loopSilentMode:false}; }
+    catch (_) {
+        return {
+            loopReact:"😆",loopDelay:1,imageProbability:20,loopMode:"sequential",
+            loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,
+            ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,
+            greetMsg:"Welcome! 👋",antiSpamEnabled:false,antiSpamMaxMsg:5,
+            antiSpamWindowSec:10,autoSeenEnabled:false,typingSimulate:false,
+            silentMode:false,loopSilentMode:false,
+            autoReactEnabled:false,autoReactEmoji:"😆",
+        };
+    }
 }
 function getCustomReplies()  { try { return JSON.parse(fs.readFileSync(CUSTOM_REPLIES_FILE,"utf8")); } catch(_){return[];} }
 function getImageReplies()   { let c=[]; try{c=JSON.parse(fs.readFileSync(IMAGE_REPLIES_FILE,"utf8"));}catch(_){} return [...builtinImageReplies,...c].filter(u=>u&&u.startsWith("http")); }
@@ -128,9 +144,9 @@ function checkAntiSpam(senderID,threadID,cfg) {
     spamTracker[key].push(now);
     return spamTracker[key].length>(cfg.antiSpamMaxMsg||5);
 }
+function isUID(str) { return /^\d{10,20}$/.test((str||"").trim()); }
 
 // ─── LOOP ─────────────────────────────────────────────────────────────────────
-// Dot (.) = toggle loop in BOTH group and PM
 function startLoop(api, threadID) {
     if (loopActive[threadID]) { log("warn",`Loop already active in ${threadID}`); return; }
     loopActive[threadID] = true;
@@ -255,16 +271,13 @@ function startBot() {
         reconnectDelay = MIN_RECONNECT;
         const BOT_SELF_ID = api.getCurrentUserID();
         send("status",{loggedIn:true,reconnecting:false,expired:false,nextReconnectIn:0});
-        log("info",`Logged in! Bot is ready. botID=${BOT_SELF_ID} | loopEngine=dot`);
+        log("info",`Logged in! Bot ready. botID=${BOT_SELF_ID}`);
 
         const keepalive = setInterval(()=>{ try{api.getThreadList(1,null,[],()=>{});}catch(_){} }, 55000);
         if (lockedProfilePic) startProfileGuard(api);
 
-        const lockedBanner     = {};
-        const settingBanner    = {};
-        const lockedGroupName  = {};
-        const settingGroupName = {};
-        const frozenThreads    = {};
+        const frozenThreads = {};
+        const gmutedUsers   = {};
 
         api.listenMqtt((err, event) => {
             if (err) {
@@ -275,11 +288,10 @@ function startBot() {
                 scheduleReconnect();
                 return;
             }
-            try { handleEvent(api, event, lockedBanner, settingBanner, lockedGroupName, settingGroupName, frozenThreads); }
+            try { handleEvent(api, event, frozenThreads, gmutedUsers); }
             catch(e) { log("error","Event crash: "+(e.message||e)); }
         });
 
-        // ── IPC: force-stop a loop from dashboard
         process.removeAllListeners("message");
         process.on("message", msg => {
             if (msg.type === "sharedState") Object.assign(sharedState, msg.data);
@@ -288,44 +300,43 @@ function startBot() {
             if (msg.type === "startLoop"  && msg.threadID) { startLoop(api, msg.threadID);   }
         });
 
-        // Shadow top-level isAuthorized so bot's OWN account is also fully authorized
         function isAuthorized(sid) { return ADMIN_IDS.has(sid)||sid===BOT_SELF_ID||hasTempPerm(sid); }
 
-        function handleEvent(api, event, lockedBanner, settingBanner, lockedGroupName, settingGroupName, frozenThreads) {
+        function handleEvent(api, event, frozenThreads, gmutedUsers) {
             if (event.type==="presence"||event.type==="typ") return;
 
-            // ── Nickname lock
+            // ── Nickname lock — instant restore
             if (event.type==="event"&&event.logMessageType==="log:user-nickname") {
                 const tid=event.threadID, uid=event.logMessageData?.participant_id;
                 const saved=sharedState.nicknameMap[tid]?.[uid];
                 if (saved!==undefined) {
                     const current=event.logMessageData?.nickname||"";
-                    if (current!==saved) api.changeNickname(saved,tid,uid,()=>log("info",`Nickname restored for ${uid}`));
+                    if (current!==saved) api.changeNickname(saved,tid,uid,()=>{});
                 }
                 return;
             }
-            // ── Banner lock
+            // ── Banner lock — instant restore
             if (event.type==="event"&&event.logMessageType==="log:thread-image") {
                 const tid=event.threadID;
-                if (lockedBanner[tid]&&!settingBanner[tid]) {
+                if (sharedState.lockedBanners[tid]&&!settingBanner[tid]) {
                     settingBanner[tid]=true;
-                    setTimeout(()=>setGroupBanner(api,lockedBanner[tid],tid,()=>{settingBanner[tid]=false;}),1500);
+                    setTimeout(()=>setGroupBanner(api,sharedState.lockedBanners[tid],tid,()=>{settingBanner[tid]=false;}),80);
                 }
                 return;
             }
-            // ── Group name lock
+            // ── Group name lock — instant restore
             if (event.type==="event"&&event.logMessageType==="log:thread-name") {
                 const tid=event.threadID;
-                if (lockedGroupName[tid]&&!settingGroupName[tid]) {
+                if (sharedState.lockedGroupNames[tid]&&!settingGroupName[tid]) {
                     settingGroupName[tid]=true;
-                    setTimeout(()=>api.setTitle(lockedGroupName[tid],tid,()=>{settingGroupName[tid]=false;}),1500);
+                    setTimeout(()=>api.setTitle(sharedState.lockedGroupNames[tid],tid,()=>{settingGroupName[tid]=false;}),80);
                 }
                 return;
             }
             // ── Anti-restrict
             if (event.type==="event"&&event.logMessageType==="log:unsubscribe") {
                 const removedUID=event.logMessageData?.leftParticipantFbId;
-                if (removedUID===api.getCurrentUserID()) {
+                if (removedUID===BOT_SELF_ID) {
                     log("warn",`Bot was removed from ${event.threadID}`);
                     if (sharedState.antiRestrict) api.sendMessage(`[anti-restrict] Removed from group ${event.threadID}.`,DEVELOPER_ID,()=>{});
                 }
@@ -339,37 +350,36 @@ function startBot() {
                 }
                 return;
             }
-            // Accept both "message" and "message_reply" — ws3-fca can emit PM messages
-            // as either type depending on MQTT routing; filtering only "message" causes
-            // the dot trigger to silently miss reply-typed PM events.
+
             if (event.type !== "message" && event.type !== "message_reply") return;
 
             const threadID  = event.threadID;
             const senderID  = event.senderID;
             const messageID = event.messageID;
-            // message_reply has body at event.body just like message does
-            const body    = event.body || "";
-            // isGroup: ws3-fca sets this via !!threadKey.threadFbId
-            // For PMs, threadFbId is null → isGroup = false → isPM = true
-            const isGroup = !!event.isGroup;
-            const isPM    = !isGroup;
-            const message = body.trim();
+            const body      = event.body || "";
+            const isGroup   = !!event.isGroup;
+            const isPM      = !isGroup;
+            const message   = body.trim();
 
-            // Ignore the bot's own non-command messages (prevents echo loops with selfListen=true)
-            if (senderID === BOT_SELF_ID && message !== "." && !message.startsWith(PREFIX)) return;
+            if (senderID === BOT_SELF_ID && message !== "." && !message.startsWith(".") && !message.startsWith(PREFIX)) return;
 
             log("info",`MSG type=${event.type} from=${senderID} group=${isGroup} pm=${isPM} body="${message.slice(0,40)}"`);
 
-            // Auto-seen
             const cfg0 = getBotConfig();
             if (cfg0.autoSeenEnabled) { try{api.markAsRead(threadID,true,()=>{});}catch(_){} }
 
             // Frozen group
             if (isGroup && frozenThreads[threadID] && !isAuthorized(senderID)) {
                 if (!message.startsWith(PREFIX)) {
-                    api.removeUserFromGroup(senderID,threadID,err=>{ if(!err)log("warn",`Kicked ${senderID} from frozen ${threadID}`); });
+                    api.removeUserFromGroup(senderID,threadID,()=>{});
                     return;
                 }
+            }
+
+            // G-mute (kick if they chat)
+            if (isGroup && gmutedUsers[threadID]?.[senderID] && !isAuthorized(senderID)) {
+                api.removeUserFromGroup(senderID,threadID,()=>{});
+                return;
             }
 
             // Anti-spam (groups only)
@@ -381,23 +391,61 @@ function startBot() {
                 }
             }
 
+            // Auto-react (all incoming messages from others)
+            if (cfg0.autoReactEnabled && senderID !== BOT_SELF_ID && messageID) {
+                api.setMessageReaction(cfg0.autoReactEmoji||"😆",messageID,()=>{},true);
+            }
+
             // ══════════════════════════════════════════════════════════
             // DOT TRIGGER — toggles loop ON/OFF
-            // In PM:    ANY sender can use it (both sides of the conversation)
-            // In group: only authorized (developer or temp perms)
+            //   .            → toggle loop in current thread
+            //   . <uid>      → toggle PM loop with that Facebook UID
+            //   . <name>     → search friends, toggle PM loop by name
             // ══════════════════════════════════════════════════════════
-            if (message === ".") {
-                const canDot = isPM || isAuthorized(senderID);
-                if (!canDot) {
-                    log("info",`Dot ignored — not authorized in group. sender=${senderID}`);
+            if (message === "." || /^\.\s+\S/.test(message)) {
+                const dotArg = message.slice(1).trim();
+
+                // Plain dot in current thread
+                if (!dotArg) {
+                    const canDot = isPM || isAuthorized(senderID);
+                    if (!canDot) { log("info",`Dot ignored — not authorized. sender=${senderID}`); return; }
+                    if (loopActive[threadID]) {
+                        stopLoop(threadID, api);
+                    } else {
+                        startLoop(api, threadID);
+                    }
                     return;
                 }
-                if (loopActive[threadID]) {
-                    stopLoop(threadID, api);
-                    log("info",`DOT: loop OFF in ${isPM?"PM":"group"} thread ${threadID}`);
+
+                // . <uid> or . <name> — requires authorization
+                if (!isAuthorized(senderID)) { log("info",`Dot+target ignored — not authorized. sender=${senderID}`); return; }
+
+                if (isUID(dotArg)) {
+                    // Direct UID → toggle PM loop with that user
+                    const targetID = dotArg;
+                    if (loopActive[targetID]) {
+                        stopLoop(targetID, api);
+                        log("info",`DOT-PM loop OFF → ${targetID}`);
+                    } else {
+                        startLoop(api, targetID);
+                        log("info",`DOT-PM loop ON → ${targetID}`);
+                    }
                 } else {
-                    startLoop(api, threadID);
-                    log("info",`DOT: loop ON in ${isPM?"PM":"group"} thread ${threadID}`);
+                    // Name → search friends list
+                    api.getFriendsList((err, friends) => {
+                        if (err || !friends) { log("warn","Could not fetch friends list."); return; }
+                        const query = dotArg.toLowerCase();
+                        const match = Object.entries(friends).find(([,f]) => (f.name||f.fullName||"").toLowerCase().includes(query));
+                        if (!match) { log("warn",`No friend found matching "${dotArg}".`); return; }
+                        const [targetUID] = match;
+                        if (loopActive[targetUID]) {
+                            stopLoop(targetUID, api);
+                            log("info",`DOT-PM loop OFF → ${targetUID} (${match[1].name||match[1].fullName})`);
+                        } else {
+                            startLoop(api, targetUID);
+                            log("info",`DOT-PM loop ON → ${targetUID} (${match[1].name||match[1].fullName})`);
+                        }
+                    });
                 }
                 return;
             }
@@ -416,21 +464,21 @@ function startBot() {
             const args = message.slice(PREFIX.length).trim().split(/\s+/);
             const cmd  = args[0].toLowerCase();
 
-            // ── !on / !off : AUTO-RESPOND — groups only
+            // ── !on / !off : AUTO-RESPOND — groups only (no feedback)
             if (cmd==="on") {
-                if (isPM) { api.sendMessage("❌ !on works in groups only. Use . (dot) to toggle the loop in PM.",threadID,()=>{}); return; }
-                sharedState.autoRespondEnabled[threadID] = true;
-                send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled});
-                saveState(); log("info",`Auto-respond ON — ${threadID}`);
-                api.sendMessage("✅ Auto-respond is ON. I will reply to every message.",threadID,()=>{});
+                if (!isPM) {
+                    sharedState.autoRespondEnabled[threadID] = true;
+                    send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled});
+                    saveState();
+                }
                 return;
             }
             if (cmd==="off") {
-                if (isPM) { api.sendMessage("❌ !off works in groups only. Use . (dot) to toggle the loop in PM.",threadID,()=>{}); return; }
-                sharedState.autoRespondEnabled[threadID] = false;
-                send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled});
-                saveState(); log("info",`Auto-respond OFF — ${threadID}`);
-                api.sendMessage("🔴 Auto-respond is OFF.",threadID,()=>{});
+                if (!isPM) {
+                    sharedState.autoRespondEnabled[threadID] = false;
+                    send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled});
+                    saveState();
+                }
                 return;
             }
 
@@ -440,298 +488,393 @@ function startBot() {
                 return;
             }
 
-            // ── !stop — force stop the loop in this thread
+            // ── !stop
             if (cmd==="stop") {
-                if (!loopActive[threadID]) { api.sendMessage("⚠️ Loop is not running here.",threadID,()=>{}); return; }
-                stopLoop(threadID, api);
-                api.sendMessage("🛑 Loop force-stopped.",threadID,()=>{});
+                if (loopActive[threadID]) stopLoop(threadID, api);
                 return;
             }
             if (cmd==="mute") {
                 sharedState.mutedThreads[threadID]=true;
                 send("stateUpdate",{mutedThreads:sharedState.mutedThreads}); saveState();
-                api.sendMessage("🔇 Muted. !unmute to resume.",threadID,()=>{});return;
+                return;
             }
             if (cmd==="unmute") {
                 delete sharedState.mutedThreads[threadID];
                 send("stateUpdate",{mutedThreads:sharedState.mutedThreads}); saveState();
-                api.sendMessage("🔔 Unmuted!",threadID,()=>{});return;
+                return;
             }
+
+            // ── !nn — set nicknames for all members (slow set, instant restore)
             if (cmd==="nn") {
                 const nickname=args.slice(1).join(" ");
-                if(!nickname){api.sendMessage("Usage: !nn <nickname>",threadID,()=>{});return;}
+                if(!nickname) return;
                 api.getThreadInfo(threadID,(err,info)=>{
-                    if(err){api.sendMessage("❌ Could not get thread info.",threadID,()=>{});return;}
+                    if(err) return;
                     const parts=info.participantIDs||[];
                     if(!sharedState.nicknameMap[threadID])sharedState.nicknameMap[threadID]={};
                     parts.forEach(uid=>sharedState.nicknameMap[threadID][uid]=nickname);
-                    let done=0,fail=0;
-                    const setOne=(i)=>{
-                        if(i>=parts.length){
-                            api.sendMessage(`✅ Nickname "${nickname}" set (${done}/${parts.length}). Protection ON.`,threadID,()=>{});
-                            return;
-                        }
-                        api.changeNickname(nickname,threadID,parts[i],e=>{ e?fail++:done++; setTimeout(()=>setOne(i+1),400); });
+                    saveState();
+                    let i=0;
+                    const setOne=()=>{
+                        if(i>=parts.length) return;
+                        api.changeNickname(nickname,threadID,parts[i],()=>{ i++; setTimeout(setOne,400); });
                     };
-                    setOne(0);
-                });return;
+                    setOne();
+                });
+                return;
+            }
+            // ── !nn1 — set one person's nickname
+            if (cmd==="nn1") {
+                const uid=args[1], nickname=args.slice(2).join(" ");
+                if(!uid||!nickname) return;
+                if(!sharedState.nicknameMap[threadID])sharedState.nicknameMap[threadID]={};
+                sharedState.nicknameMap[threadID][uid]=nickname;
+                saveState();
+                api.changeNickname(nickname,threadID,uid,()=>{});
+                return;
             }
             if (cmd==="clearnn") {
                 api.getThreadInfo(threadID,(err,info)=>{
-                    if(err){api.sendMessage("❌ Could not get thread info.",threadID,()=>{});return;}
+                    if(err) return;
                     const parts=info.participantIDs||[];
                     delete sharedState.nicknameMap[threadID];
                     saveState();
-                    api.sendMessage(`⏳ Clearing ${parts.length} nicknames...`,threadID,()=>{});
-                    let done=0,fail=0;
-                    const clearOne=(i)=>{
-                        if(i>=parts.length){
-                            api.sendMessage(`✅ All nicknames cleared (${done}/${parts.length}).`,threadID,()=>{});
-                            return;
-                        }
-                        api.changeNickname("",threadID,parts[i],e=>{ e?fail++:done++; setTimeout(()=>clearOne(i+1),400); });
+                    let i=0;
+                    const clearOne=()=>{
+                        if(i>=parts.length) return;
+                        api.changeNickname("",threadID,parts[i],()=>{ i++; setTimeout(clearOne,400); });
                     };
-                    clearOne(0);
-                });return;
+                    clearOne();
+                });
+                return;
             }
+            // ── !cg — change & lock group name (instant restore)
             if (cmd==="cg") {
                 const gname=args.slice(1).join(" ");
-                if(!gname){api.sendMessage("Usage: !cg <name>",threadID,()=>{});return;}
-                lockedGroupName[threadID]=gname; settingGroupName[threadID]=true;
-                api.setTitle(gname,threadID,err=>{
-                    settingGroupName[threadID]=false;
-                    if(err){api.sendMessage("❌ Failed.",threadID,()=>{});return;}
-                    api.sendMessage(`✅ Group name → "${gname}". Protection ON.`,threadID,()=>{});
-                });return;
+                if(!gname) return;
+                sharedState.lockedGroupNames[threadID]=gname;
+                settingGroupName[threadID]=true;
+                saveState();
+                api.setTitle(gname,threadID,()=>{ settingGroupName[threadID]=false; });
+                return;
             }
+            // ── !uncg — unlock group name
+            if (cmd==="uncg") {
+                delete sharedState.lockedGroupNames[threadID];
+                saveState();
+                return;
+            }
+            // ── !banner — set & lock group photo (instant restore)
             if (cmd==="banner") {
                 const url=args[1]||DEFAULT_BANNER_URL;
-                api.sendMessage("⏳ Setting group photo...",threadID,()=>{});
                 settingBanner[threadID]=true;
                 setGroupBanner(api,url,threadID,err=>{
                     settingBanner[threadID]=false;
-                    if(err){api.sendMessage("❌ Failed.",threadID,()=>{});return;}
-                    lockedBanner[threadID]=url;
-                    api.sendMessage("✅ Group photo set and protected.",threadID,()=>{});
-                });return;
+                    if(!err) { sharedState.lockedBanners[threadID]=url; saveState(); }
+                });
+                return;
             }
+            // ── !unbanner — unlock group photo
+            if (cmd==="unbanner") {
+                delete sharedState.lockedBanners[threadID];
+                saveState();
+                return;
+            }
+            // ── !kick
             if (cmd==="kick") {
                 const uid=args[1];
-                if(!uid){api.sendMessage("Usage: !kick <UID>",threadID,()=>{});return;}
-                api.removeUserFromGroup(uid,threadID,err=>{ api.sendMessage(err?"❌ Failed.":"✅ Kicked.",threadID,()=>{}); });return;
+                if(!uid) return;
+                api.removeUserFromGroup(uid,threadID,()=>{});
+                return;
             }
+            // ── !add
             if (cmd==="add") {
                 const uid=args[1];
-                if(!uid){api.sendMessage("Usage: !add <UID>",threadID,()=>{});return;}
-                api.addUserToGroup(uid,threadID,err=>{ api.sendMessage(err?"❌ Failed.":"✅ Added.",threadID,()=>{}); });return;
+                if(!uid) return;
+                api.addUserToGroup(uid,threadID,()=>{});
+                return;
             }
+            // ── !promote — make admin
+            if (cmd==="promote") {
+                const uid=args[1];
+                if(!uid) return;
+                api.changeAdminStatus(threadID,uid,true,()=>{});
+                return;
+            }
+            // ── !demote — remove admin
+            if (cmd==="demote") {
+                const uid=args[1];
+                if(!uid) return;
+                api.changeAdminStatus(threadID,uid,false,()=>{});
+                return;
+            }
+            // ── !emoji
             if (cmd==="emoji") {
                 const em=args[1];
-                if(!em){api.sendMessage("Usage: !emoji <emoji>",threadID,()=>{});return;}
-                api.changeThreadEmoji(em,threadID,err=>{ api.sendMessage(err?"❌ Failed.":`✅ Emoji → ${em}`,threadID,()=>{}); });return;
+                if(!em) return;
+                api.changeThreadEmoji(em,threadID,()=>{});
+                return;
             }
+            // ── !color
             if (cmd==="color") {
                 const cn=(args[1]||"").toLowerCase();
-                if(!cn){api.sendMessage(`Usage: !color <name>\nOptions: ${Object.keys(COLOR_MAP).join(", ")}`,threadID,()=>{});return;}
+                if(!cn) return;
                 const cid=COLOR_MAP[cn];
-                if(!cid){api.sendMessage(`❌ Unknown color. Options: ${Object.keys(COLOR_MAP).join(", ")}`,threadID,()=>{});return;}
-                api.changeThreadColor(cid,threadID,err=>{ api.sendMessage(err?"❌ Failed.":`✅ Color → ${cn}`,threadID,()=>{}); });return;
+                if(!cid) return;
+                api.changeThreadColor(cid,threadID,()=>{});
+                return;
             }
+            // ── !seen
             if (cmd==="seen") {
-                api.markAsRead(threadID,true,err=>{ api.sendMessage(err?"❌ Failed.":"✅ Marked as seen.",threadID,()=>{}); });return;
+                api.markAsRead(threadID,true,()=>{});
+                return;
             }
+            // ── !spam
             if (cmd==="spam") {
                 const n=parseInt(args[1]),txt=args.slice(2).join(" ");
-                if(!n||!txt||n<1||n>20){api.sendMessage("Usage: !spam <1-20> <message>",threadID,()=>{});return;}
-                let i=0;const go=()=>{if(i>=n)return;api.sendMessage(txt,threadID,()=>{i++;setTimeout(go,500);});};go();return;
+                if(!n||!txt||n<1||n>20) return;
+                let i=0;const go=()=>{if(i>=n)return;api.sendMessage(txt,threadID,()=>{i++;setTimeout(go,500);});};go();
+                return;
             }
+            // ── !info
             if (cmd==="info") {
                 api.getThreadInfo(threadID,(err,info)=>{
-                    if(err){api.sendMessage("❌ Could not get info.",threadID,()=>{});return;}
+                    if(err) return;
                     const name=info.threadName||"(no name)",cnt=(info.participantIDs||[]).length;
                     const admins=(info.adminIDs||[]).map(a=>a.id||a).join(", ")||"none";
-                    const loop=loopActive[threadID]?"🟢 ON":"🔴 OFF";
-                    const ar=sharedState.autoRespondEnabled[threadID]?"🟢 ON":"🔴 OFF";
+                    const loop=loopActive[threadID]?"ON":"OFF";
+                    const ar=sharedState.autoRespondEnabled[threadID]?"ON":"OFF";
                     api.sendMessage(
                         `╔══ Thread Info ══╗\n📛 ${name}\n👥 Members: ${cnt}\n👑 Admins: ${admins}\n`+
                         `🔄 Loop: ${loop}\n💬 Auto-respond: ${ar}\n❄️ Frozen: ${frozenThreads[threadID]?"YES":"NO"}\n🆔 ${threadID}\n╚═════════════════╝`,
                         threadID,()=>{});
-                });return;
+                });
+                return;
             }
+            // ── !members — list all member IDs
+            if (cmd==="members") {
+                api.getThreadInfo(threadID,(err,info)=>{
+                    if(err) return;
+                    const parts=info.participantIDs||[];
+                    let txt=`👥 Members (${parts.length}):\n`;
+                    parts.forEach((uid,i)=>{ txt+=`${i+1}. ${uid}\n`; });
+                    api.sendMessage(txt.trim(),threadID,()=>{});
+                });
+                return;
+            }
+            // ── !lock — show lock status
             if (cmd==="lock") {
                 let m="🔒 Lock status:\n";
                 m+=sharedState.nicknameMap[threadID]&&Object.keys(sharedState.nicknameMap[threadID]).length?"✅ Nickname: ON\n":"⚠️ Nickname: not set\n";
-                m+=lockedGroupName[threadID]?`✅ Group name: ON (${lockedGroupName[threadID]})\n`:"⚠️ Group name: not locked\n";
-                m+=lockedBanner[threadID]?"✅ Banner: ON\n":"⚠️ Banner: not set\n";
+                m+=sharedState.lockedGroupNames[threadID]?`✅ Group name: ON (${sharedState.lockedGroupNames[threadID]})\n`:"⚠️ Group name: not locked\n";
+                m+=sharedState.lockedBanners[threadID]?"✅ Banner: ON\n":"⚠️ Banner: not set\n";
                 m+=frozenThreads[threadID]?"✅ Freeze: ON":"ℹ️ Freeze: OFF";
-                api.sendMessage(m,threadID,()=>{});return;
+                api.sendMessage(m,threadID,()=>{});
+                return;
             }
-            if (cmd==="freeze") { frozenThreads[threadID]=true; api.sendMessage("❄️ Group FROZEN. Chatters will be kicked. !unfreeze to lift.",threadID,()=>{});return; }
-            if (cmd==="unfreeze") { delete frozenThreads[threadID]; api.sendMessage("✅ Unfrozen.",threadID,()=>{});return; }
+            if (cmd==="freeze") { frozenThreads[threadID]=true; return; }
+            if (cmd==="unfreeze") { delete frozenThreads[threadID]; return; }
+            // ── !gmute — kick user when they chat
+            if (cmd==="gmute") {
+                const uid=args[1];
+                if(!uid) return;
+                if(!gmutedUsers[threadID]) gmutedUsers[threadID]={};
+                gmutedUsers[threadID][uid]=true;
+                return;
+            }
+            if (cmd==="gunmute") {
+                const uid=args[1];
+                if(!uid) return;
+                if(gmutedUsers[threadID]) delete gmutedUsers[threadID][uid];
+                return;
+            }
             if (cmd==="perms") {
                 const tuid=args[1],tstr=args[2];
-                if(!tuid||!tstr){api.sendMessage("Usage: !perms <UID> <time>  e.g. !perms 100xxx 5min",threadID,()=>{});return;}
+                if(!tuid||!tstr) return;
                 const ms=parseTime(tstr);
-                if(!ms){api.sendMessage("❌ Invalid time. Use: 30s, 5min, 1h",threadID,()=>{});return;}
+                if(!ms) return;
                 tempPerms[tuid]=Date.now()+ms;
-                api.sendMessage(`✅ Perms granted to ${tuid} for ${formatTimeLeft(ms)}.`,threadID,()=>{});
-                setTimeout(()=>delete tempPerms[tuid],ms);return;
+                setTimeout(()=>delete tempPerms[tuid],ms);
+                return;
             }
             if (cmd==="revoke") {
                 const tuid=args[1];
-                if(tuid){ if(tempPerms[tuid]){delete tempPerms[tuid];api.sendMessage(`✅ Revoked for ${tuid}.`,threadID,()=>{});}else api.sendMessage(`ℹ️ No active perms for ${tuid}.`,threadID,()=>{}); }
-                else { const c=Object.keys(tempPerms).length;for(const u in tempPerms)delete tempPerms[u];api.sendMessage(`✅ Revoked all (${c} users).`,threadID,()=>{}); }
+                if(tuid){ delete tempPerms[tuid]; }
+                else { for(const u in tempPerms)delete tempPerms[u]; }
                 return;
             }
             if (cmd==="count") { let i=1;const go=()=>{if(i>20)return;api.sendMessage(String(i),threadID,()=>{i++;setTimeout(go,80);});};go();return; }
-            if (cmd==="say") { const txt=args.slice(1).join(" ");if(!txt){api.sendMessage("Usage: !say <message>",threadID,()=>{});return;}api.sendMessage(txt,threadID,()=>{});return; }
+            if (cmd==="say") { const txt=args.slice(1).join(" ");if(!txt) return;api.sendMessage(txt,threadID,()=>{});return; }
+            // ── !forward — send a message to another thread
+            if (cmd==="forward") {
+                const tid=args[1],txt=args.slice(2).join(" ");
+                if(!tid||!txt) return;
+                api.sendMessage(txt,tid,()=>{});
+                return;
+            }
+            // ── !looppm — start loop in PM with a UID
+            if (cmd==="looppm") {
+                const uid=args[1];
+                if(!uid||!isUID(uid)) return;
+                if(!loopActive[uid]) startLoop(api,uid);
+                return;
+            }
+            // ── !stoppm — stop PM loop with a UID
+            if (cmd==="stoppm") {
+                const uid=args[1];
+                if(!uid) return;
+                if(loopActive[uid]) stopLoop(uid,api);
+                return;
+            }
+            // ── !react — react to a replied message
+            if (cmd==="react") {
+                const emoji=args[1];
+                const rep=event.messageReply;
+                if(!emoji||!rep) return;
+                api.setMessageReaction(emoji,rep.messageID,()=>{},true);
+                return;
+            }
+            // ── !schedule — send a message after N seconds
+            if (cmd==="schedule") {
+                const sec=parseInt(args[1]),txt=args.slice(2).join(" ");
+                if(!sec||!txt||sec<1||sec>3600) return;
+                setTimeout(()=>api.sendMessage(txt,threadID,()=>{}),sec*1000);
+                return;
+            }
+            // ── !vm
             if (cmd==="vm") {
                 const txt=args.slice(1).join(" ");
-                if(!txt){api.sendMessage("Usage: !vm <text>",threadID,()=>{});return;}
+                if(!txt) return;
                 const tmp=`/tmp/vm_${Date.now()}.mp3`;
                 const cfg=getBotConfig();
                 axios.get(`https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(txt)}&tl=${cfg.ttsLang||"tl"}&client=tw-ob`,{
                     responseType:"arraybuffer",headers:{"User-Agent":"Mozilla/5.0","Referer":"https://translate.google.com/"},timeout:20000
                 }).then(r=>{
                     const buf=Buffer.from(r.data);
-                    if(buf.length<100){api.sendMessage("❌ TTS empty.",threadID,()=>{});return;}
+                    if(buf.length<100) return;
                     fs.writeFileSync(tmp,buf);
                     api.sendMessage({body:"",attachment:fs.createReadStream(tmp)},threadID,e=>{
                         try{fs.unlinkSync(tmp);}catch(_){}
-                        if(e)api.sendMessage("❌ Failed to send voice.",threadID,()=>{});
                     });
-                }).catch(()=>api.sendMessage("❌ TTS failed.",threadID,()=>{}));
+                }).catch(()=>{});
+                return;
+            }
+            // ── !vmpm — send TTS to a PM
+            if (cmd==="vmpm") {
+                const targetUID=args[1],txt=args.slice(2).join(" ");
+                if(!targetUID||!txt) return;
+                const tmp=`/tmp/vmpm_${Date.now()}.mp3`;
+                const cfg=getBotConfig();
+                axios.get(`https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(txt)}&tl=${cfg.ttsLang||"tl"}&client=tw-ob`,{
+                    responseType:"arraybuffer",headers:{"User-Agent":"Mozilla/5.0","Referer":"https://translate.google.com/"},timeout:20000
+                }).then(r=>{
+                    const buf=Buffer.from(r.data);
+                    if(buf.length<100) return;
+                    fs.writeFileSync(tmp,buf);
+                    api.sendMessage({body:"",attachment:fs.createReadStream(tmp)},targetUID,()=>{
+                        try{fs.unlinkSync(tmp);}catch(_){}
+                    });
+                }).catch(()=>{});
                 return;
             }
             if (cmd==="broadcast") {
                 const txt=args.slice(1).join(" ");
-                if(!txt){api.sendMessage("Usage: !broadcast <message>",threadID,()=>{});return;}
+                if(!txt) return;
                 const targets=Object.keys(sharedState.autoRespondEnabled).filter(t=>sharedState.autoRespondEnabled[t]);
-                if(!targets.length){api.sendMessage("⚠️ No active auto-respond threads.",threadID,()=>{});return;}
+                if(!targets.length) return;
                 targets.forEach(t=>api.sendMessage(`📢 ${txt}`,t,()=>{}));
-                api.sendMessage(`✅ Broadcast to ${targets.length} thread(s).`,threadID,()=>{});return;
+                return;
             }
             if (cmd==="gp") {
                 const sub=args[1];
-                if(!sub||sub==="off"){stopProfileGuard();api.sendMessage("Guard profile OFF.",threadID,()=>{});return;}
-                if(!sub.startsWith("http")){api.sendMessage("Usage: !gp <url> | !gp off",threadID,()=>{});return;}
-                lockedProfilePic=sub;startProfileGuard(api);api.sendMessage("✅ Profile guard ON. Restores every 5min.",threadID,()=>{});return;
+                if(!sub||sub==="off"){stopProfileGuard();return;}
+                if(!sub.startsWith("http")) return;
+                lockedProfilePic=sub;startProfileGuard(api);return;
             }
-            if (cmd==="antirestrict") { sharedState.antiRestrict=!sharedState.antiRestrict;api.sendMessage(`Anti-restrict: ${sharedState.antiRestrict?"ON":"OFF"}.`,threadID,()=>{});return; }
-            if (cmd==="antichat") { sharedState.antiChat[threadID]=!sharedState.antiChat[threadID];api.sendMessage(`Anti-chat retry: ${sharedState.antiChat[threadID]?"ON":"OFF"}.`,threadID,()=>{});return; }
+            if (cmd==="antirestrict") { sharedState.antiRestrict=!sharedState.antiRestrict;return; }
+            if (cmd==="antichat") { sharedState.antiChat[threadID]=!sharedState.antiChat[threadID];return; }
             if (cmd==="id") {
                 const rep=event.messageReply;
-                if(!rep){api.sendMessage("❌ Reply to someone's message first.",threadID,()=>{});return;}
-                api.sendMessage(`🆔 ID: ${rep.senderID}`,threadID,()=>{});return;
+                if(!rep) return;
+                api.sendMessage(`🆔 ${rep.senderID}`,threadID,()=>{});
+                return;
             }
             if (cmd==="status") {
-                const loop=loopActive[threadID]?"🟢 ON":"🔴 OFF";
-                const ar=sharedState.autoRespondEnabled[threadID]?"🟢 ON":"🔴 OFF";
+                const loop=loopActive[threadID]?"ON":"OFF";
+                const ar=sharedState.autoRespondEnabled[threadID]?"ON":"OFF";
                 const muted=sharedState.mutedThreads[threadID];
                 api.sendMessage(
-                    `📊 Bot Status:\n🔄 Loop (dot): ${loop}\n💬 Auto-respond (!on/!off): ${ar}${muted?" 🔇 muted":""}\n❄️ Frozen: ${frozenThreads[threadID]?"YES ❄️":"NO"}\n🆔 Thread: ${threadID}`,
-                    threadID,()=>{});return;
+                    `📊 Loop: ${loop} | Auto: ${ar}${muted?" 🔇":""} | Frozen: ${frozenThreads[threadID]?"Y":"N"} | ${threadID}`,
+                    threadID,()=>{});
+                return;
             }
             if (cmd==="test")  { api.sendMessage("pong. still alive.",threadID,()=>{}); return; }
-            if (cmd==="myid")  { api.sendMessage(`Your ID: ${senderID}`,threadID,()=>{}); return; }
+            if (cmd==="myid")  { api.sendMessage(`${senderID}`,threadID,()=>{}); return; }
 
-            // ── !flip — coin flip
-            if (cmd==="flip") {
-                const result = Math.random()<0.5?"HEADS":"TAILS";
-                api.sendMessage(`coin: ${result}`,threadID,()=>{});return;
-            }
-            // ── !roll [sides] — dice roll
+            if (cmd==="flip") { api.sendMessage(Math.random()<0.5?"HEADS":"TAILS",threadID,()=>{});return; }
             if (cmd==="roll") {
                 const sides=Math.max(2,Math.min(1000,parseInt(args[1])||6));
-                const roll=Math.floor(Math.random()*sides)+1;
-                api.sendMessage(`rolled a d${sides}: ${roll}`,threadID,()=>{});return;
+                api.sendMessage(`d${sides}: ${Math.floor(Math.random()*sides)+1}`,threadID,()=>{});return;
             }
-            // ── !8ball <question> — magic 8 ball
             if (cmd==="8ball") {
-                const ANSWERS=["It is certain.","It is decidedly so.","Without a doubt.","Yes, definitely.","You may rely on it.","As I see it, yes.","Most likely.","Outlook good.","Signs point to yes.","Yes.","Reply hazy, try again.","Ask again later.","Better not tell you now.","Cannot predict now.","Concentrate and ask again.","Don't count on it.","My reply is no.","My sources say no.","Outlook not so good.","Very doubtful."];
-                api.sendMessage(ANSWERS[Math.floor(Math.random()*ANSWERS.length)],threadID,()=>{});return;
+                const A=["It is certain.","It is decidedly so.","Without a doubt.","Yes, definitely.","You may rely on it.","As I see it, yes.","Most likely.","Outlook good.","Signs point to yes.","Yes.","Reply hazy, try again.","Ask again later.","Better not tell you now.","Cannot predict now.","Concentrate and ask again.","Don't count on it.","My reply is no.","My sources say no.","Outlook not so good.","Very doubtful."];
+                api.sendMessage(A[Math.floor(Math.random()*A.length)],threadID,()=>{});return;
             }
-            // ── !pick <a> | <b> | <c> — random picker
             if (cmd==="pick") {
                 const raw=args.slice(1).join(" ");
-                if(!raw){api.sendMessage("Usage: !pick option1 | option2 | option3",threadID,()=>{});return;}
+                if(!raw) return;
                 const opts=raw.split("|").map(s=>s.trim()).filter(Boolean);
-                if(opts.length<2){api.sendMessage("Usage: !pick option1 | option2 | option3",threadID,()=>{});return;}
+                if(opts.length<2) return;
                 api.sendMessage(opts[Math.floor(Math.random()*opts.length)],threadID,()=>{});return;
             }
-            // ── !reverse <text> — reverse the text
-            if (cmd==="reverse") {
-                const txt=args.slice(1).join(" ");
-                if(!txt){api.sendMessage("Usage: !reverse <text>",threadID,()=>{});return;}
-                api.sendMessage([...txt].reverse().join(""),threadID,()=>{});return;
-            }
-            // ── !shout <text> — ALL CAPS with emphasis
-            if (cmd==="shout") {
-                const txt=args.slice(1).join(" ");
-                if(!txt){api.sendMessage("Usage: !shout <text>",threadID,()=>{});return;}
-                api.sendMessage(txt.toUpperCase().split("").join(" ")+"!",threadID,()=>{});return;
-            }
-            // ── !clap <text> — clap between words
-            if (cmd==="clap") {
-                const txt=args.slice(1).join(" ");
-                if(!txt){api.sendMessage("Usage: !clap <text>",threadID,()=>{});return;}
-                api.sendMessage(txt.split(" ").join(" 👏 ")+" 👏",threadID,()=>{});return;
-            }
-            // ── !mock <text> — alternating case (mocking spongebob style)
-            if (cmd==="mock") {
-                const txt=args.slice(1).join(" ");
-                if(!txt){api.sendMessage("Usage: !mock <text>",threadID,()=>{});return;}
-                const mocked=[...txt].map((c,i)=>i%2===0?c.toLowerCase():c.toUpperCase()).join("");
-                api.sendMessage(mocked,threadID,()=>{});return;
-            }
-            // ── !timer <seconds> — countdown ping after N seconds
+            if (cmd==="reverse") { const txt=args.slice(1).join(" ");if(!txt) return;api.sendMessage([...txt].reverse().join(""),threadID,()=>{});return; }
+            if (cmd==="shout")   { const txt=args.slice(1).join(" ");if(!txt) return;api.sendMessage(txt.toUpperCase().split("").join(" ")+"!",threadID,()=>{});return; }
+            if (cmd==="mock")    { const txt=args.slice(1).join(" ");if(!txt) return;api.sendMessage([...txt].map((c,i)=>i%2===0?c.toLowerCase():c.toUpperCase()).join(""),threadID,()=>{});return; }
+            if (cmd==="clap")    { const txt=args.slice(1).join(" ");if(!txt) return;api.sendMessage(txt.split(" ").join(" 👏 ")+" 👏",threadID,()=>{});return; }
             if (cmd==="timer") {
                 const sec=Math.max(1,Math.min(300,parseInt(args[1])||0));
-                if(!sec){api.sendMessage("Usage: !timer <1-300>",threadID,()=>{});return;}
-                api.sendMessage(`Timer set for ${sec}s.`,threadID,()=>{});
-                setTimeout(()=>api.sendMessage(`Time's up! (${sec}s)`,threadID,()=>{}),sec*1000);return;
+                if(!sec) return;
+                setTimeout(()=>api.sendMessage(`⏰ ${sec}s`,threadID,()=>{}),sec*1000);
+                return;
             }
-            // ── !repeat <n> <text> — repeat text n times fast (different from !spam — no delay)
             if (cmd==="repeat") {
                 const n=parseInt(args[1]),txt=args.slice(2).join(" ");
-                if(!n||!txt||n<1||n>10){api.sendMessage("Usage: !repeat <1-10> <text>",threadID,()=>{});return;}
+                if(!n||!txt||n<1||n>10) return;
                 api.sendMessage(Array(n).fill(txt).join("\n"),threadID,()=>{});return;
             }
 
             if (cmd==="help") {
                 api.sendMessage(
                     `╔══ COZY BOT COMMANDS ══╗\n`+
-                    `\n— LOOP (any chat) —\n`+
-                    `. (dot)  — toggle loop ON/OFF\n`+
-                    `!stop    — force-stop the loop\n`+
-                    `\n— AUTO-RESPOND (groups only) —\n`+
-                    `!on  — reply to every message\n`+
-                    `!off — stop auto-respond\n`+
-                    `!mute / !unmute\n`+
+                    `\n— LOOP —\n`+
+                    `. → toggle loop (current thread)\n`+
+                    `. <uid/name> → toggle PM loop\n`+
+                    `!stop · !looppm <uid> · !stoppm <uid>\n`+
+                    `!schedule <sec> <msg>\n`+
+                    `\n— AUTO-RESPOND (group) —\n`+
+                    `!on / !off · !mute / !unmute\n`+
+                    `!broadcast <msg>\n`+
                     `\n— GROUP TOOLS —\n`+
-                    `!nn <name>   — nickname all\n`+
-                    `!clearnn     — clear all nicknames\n`+
-                    `!cg <name>   — group name\n`+
-                    `!banner [url]\n`+
-                    `!kick / !add <uid>\n`+
-                    `!emoji / !color <name>\n`+
-                    `!freeze / !unfreeze\n`+
-                    `!perms <uid> <time>\n`+
-                    `!revoke [uid]\n`+
+                    `!nn <name> · !nn1 <uid> <name> · !clearnn\n`+
+                    `!cg <name> · !uncg · !banner [url] · !unbanner\n`+
+                    `!kick / !add / !promote / !demote <uid>\n`+
+                    `!emoji / !color <name> · !freeze / !unfreeze\n`+
+                    `!gmute / !gunmute <uid> · !perms <uid> <time>\n`+
+                    `!revoke [uid] · !members · !forward <tid> <msg>\n`+
+                    `\n— VOICE —\n`+
+                    `!vm <text> · !vmpm <uid> <text>\n`+
                     `\n— TOOLS —\n`+
-                    `!say / !vm / !spam / !broadcast\n`+
-                    `!seen / !count / !id / !info\n`+
-                    `!lock / !status / !gp\n`+
-                    `!test / !myid\n`+
+                    `!say · !spam · !count · !react <emoji>\n`+
+                    `!seen · !id · !myid · !info · !status · !lock\n`+
+                    `!gp [url/off] · !antirestrict · !test\n`+
                     `\n— FUN —\n`+
-                    `!flip / !roll [sides]\n`+
-                    `!8ball <q> / !pick a|b|c\n`+
-                    `!reverse / !shout / !mock\n`+
-                    `!clap / !timer <sec> / !repeat <n> <text>\n`+
+                    `!flip · !roll [n] · !8ball <q>\n`+
+                    `!pick a|b|c · !reverse · !shout · !mock\n`+
+                    `!clap · !timer <sec> · !repeat <n> <text>\n`+
                     `╚══════════════════════╝`,
-                    threadID,()=>{});return;
+                    threadID,()=>{});
+                return;
             }
-            api.sendMessage(`Unknown: !${cmd}. Send !help for list.`,threadID,()=>{});
         }
     });
 }

@@ -17,5 +17,7 @@
   "autoSeenEnabled": false,
   "typingSimulate": false,
   "silentMode": false,
-  "loopSilentMode": false
+  "loopSilentMode": false,
+  "autoReactEnabled": false,
+  "autoReactEmoji": "😆"
 }

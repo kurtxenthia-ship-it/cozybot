@@ -8,5 +8,7 @@
   "mutedThreads": {},
   "nicknameMap": {},
   "antiRestrict": false,
-  "antiChat": {}
+  "antiChat": {},
+  "lockedBanners": {},
+  "lockedGroupNames": {}
 }

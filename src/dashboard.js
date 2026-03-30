@@ -48,11 +48,18 @@ function readImageReplies() { try{return JSON.parse(fs.readFileSync(IMAGE_REPLIE
 function writeImageReplies(a){ fs.writeFileSync(IMAGE_REPLIES_FILE,JSON.stringify(a,null,2),"utf8"); }
 function readBotConfig() {
     try{return JSON.parse(fs.readFileSync(BOT_CONFIG_FILE,"utf8"));}
-    catch(_){return{loopReact:"😆",loopDelay:1,imageProbability:20,loopMode:"sequential",loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,greetMsg:"Welcome! 👋",antiSpamEnabled:false,antiSpamMaxMsg:5,antiSpamWindowSec:10,autoSeenEnabled:false,typingSimulate:false,silentMode:false,loopSilentMode:false};}
+    catch(_){return{
+        loopReact:"😆",loopDelay:1,imageProbability:20,loopMode:"sequential",
+        loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,
+        ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,
+        greetMsg:"Welcome! 👋",antiSpamEnabled:false,antiSpamMaxMsg:5,
+        antiSpamWindowSec:10,autoSeenEnabled:false,typingSimulate:false,
+        silentMode:false,loopSilentMode:false,
+        autoReactEnabled:false,autoReactEmoji:"😆",
+    };}
 }
 function writeBotConfig(c){ fs.writeFileSync(BOT_CONFIG_FILE,JSON.stringify(c,null,2),"utf8"); }
 
-// Fixed body parser — handles = signs inside values
 function parseBody(req) {
     return new Promise(resolve => {
         let raw = "";
@@ -73,7 +80,6 @@ function parseBody(req) {
     });
 }
 
-// Read raw body as-is (for JSON payloads)
 function readRawBody(req) {
     return new Promise(resolve => {
         let raw = "";
@@ -119,7 +125,6 @@ function buildHTML(tab) {
             <span class="nav-label">${tb.label}</span>
         </a>`).join("");
 
-    // Bot pills
     const botBadges = state.bots.length===0
         ? `<div class="pill pill-off"><span class="pdot"></span>No bots loaded</div>`
         : state.bots.map(b=>{
@@ -128,7 +133,6 @@ function buildHTML(tab) {
             return `<div class="pill ${cls}"><span class="pdot"></span><b>${esc(b.label)}</b> — ${lbl}</div>`;
         }).join("");
 
-    // Log rows
     const logRows = logs.length===0
         ? `<div class="lrow lidle"><span class="ltime">--:--</span><span class="llvl">IDLE</span><span class="lmsg">Waiting…</span></div>`
         : logs.slice(0,120).map(l=>{
@@ -143,7 +147,7 @@ function buildHTML(tab) {
                 <div class="hero-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a2 2 0 0 1 2 2v1h1a3 3 0 0 1 3 3v1a2 2 0 0 1 0 4v1a3 3 0 0 1-3 3h-1v1a2 2 0 0 1-4 0v-1H9a3 3 0 0 1-3-3v-1a2 2 0 0 1 0-4V8a3 3 0 0 1 3-3h1V4a2 2 0 0 1 2-2z"/><circle cx="9" cy="11" r="1" fill="currentColor"/><circle cx="15" cy="11" r="1" fill="currentColor"/></svg></div>
                 <div>
                     <div class="hero-title">Cozy Bot Panel</div>
-                    <div class="hero-sub">loop (dot) · auto-respond (!on/!off) · group tools · tts</div>
+                    <div class="hero-sub">loop · auto-respond · lock · pm-loop · voice · group tools</div>
                 </div>
                 <div class="status-badge" style="--sc:${statusDot}">
                     <span class="sdot"></span>${statusText}
@@ -164,7 +168,7 @@ function buildHTML(tab) {
                 <thead><tr><th>Thread ID</th><th>Loop (dot)</th><th>Auto-Respond (!on/!off)</th></tr></thead>
                 <tbody>${
                     uniqueThreads.length===0
-                    ? `<tr><td colspan="3" class="td-empty">No threads yet — send <code>.</code> (dot) in Messenger to start</td></tr>`
+                    ? `<tr><td colspan="3" class="td-empty">No threads yet — send <code>.</code> in Messenger to start</td></tr>`
                     : uniqueThreads.map(tid=>{
                         const loop  = state.loopEnabled&&state.loopEnabled[tid];
                         const ar    = state.autoRespondEnabled&&state.autoRespondEnabled[tid];
@@ -214,7 +218,7 @@ function buildHTML(tab) {
             <div>
                 <div class="section-label">Text Message Pool</div>
                 <div class="panel">
-                    <div class="ph"><span class="pbadge">QUEUE</span><span class="ph-title">Custom Text Replies</span><span class="ph-meta" style="color:var(--ac2)">${customReplies.length} custom · ${customReplies.length+102} total</span></div>
+                    <div class="ph"><span class="pbadge">QUEUE</span><span class="ph-title">Custom Text Replies</span><span class="ph-meta" style="color:var(--ac2)">${customReplies.length} custom</span></div>
                     <form class="irow" method="POST" action="/api/replies/add?tab=loop">
                         <input class="ifield" type="text" name="word" placeholder="Add new message to loop pool…" autocomplete="off" required/>
                         <button class="btn-add" type="submit">＋ Add</button>
@@ -235,9 +239,22 @@ function buildHTML(tab) {
             </div>
         </div>`;
 
-    // ── PAGE: CONFIG ──────────────────────────────────────────────────
+    // ── PAGE: CONFIG (swipeable categories) ──────────────────────────
     const pageConfig = `
-        <form method="POST" action="/api/config/save?tab=config">
+    <div class="cfg-tabs-wrap">
+        <div class="cfg-tabs" id="cfgTabs">
+            <button class="cfg-tab active" onclick="showCat('loop',this)">🔄 Loop</button>
+            <button class="cfg-tab" onclick="showCat('autorespond',this)">💬 Auto-Respond</button>
+            <button class="cfg-tab" onclick="showCat('react',this)">👍 Auto-React</button>
+            <button class="cfg-tab" onclick="showCat('silent',this)">🔕 Silent Mode</button>
+            <button class="cfg-tab" onclick="showCat('security',this)">🔒 Security</button>
+            <button class="cfg-tab" onclick="showCat('voice',this)">🎙️ Voice / TTS</button>
+        </div>
+    </div>
+    <form method="POST" action="/api/config/save?tab=config">
+
+    <!-- ── LOOP ── -->
+    <div class="cfg-cat" id="cat-loop">
         <div class="two-col">
             <div>
                 <div class="section-label">Loop Engine</div>
@@ -245,7 +262,7 @@ function buildHTML(tab) {
                     <div class="ph"><span class="pbadge">LOOP</span><span class="ph-title">Dot Trigger Settings</span></div>
                     <div class="cfg-body">
                         <div class="cfg-field"><label class="cfg-label">Reaction Emoji</label><input class="cfg-input" type="text" name="loopReact" value="${esc(cfg.loopReact||'😆')}" maxlength="8"/></div>
-                        <div class="cfg-field"><label class="cfg-label">Delay (seconds)</label><input class="cfg-input" type="number" name="loopDelay" value="${cfg.loopDelay||5}" min="1" max="300"/><div class="cfg-hint">Interval between messages</div></div>
+                        <div class="cfg-field"><label class="cfg-label">Delay (seconds)</label><input class="cfg-input" type="number" name="loopDelay" value="${cfg.loopDelay||1}" min="1" max="300"/><div class="cfg-hint">Interval between messages</div></div>
                         <div class="cfg-field"><label class="cfg-label">Image Chance (%)</label><input class="cfg-input" type="number" name="imageProbability" value="${cfg.imageProbability||20}" min="0" max="100"/></div>
                         <div class="cfg-field"><label class="cfg-label">Loop Mode</label>
                             <select class="cfg-select" name="loopMode">
@@ -255,39 +272,206 @@ function buildHTML(tab) {
                         </div>
                         <div class="cfg-field"><label class="cfg-label">Max Messages (0 = unlimited)</label><input class="cfg-input" type="number" name="maxLoopCount" value="${cfg.maxLoopCount||0}" min="0"/></div>
                         <div class="cfg-field"><label class="cfg-label">Auto-Stop After (min, 0 = off)</label><input class="cfg-input" type="number" name="autoStopMinutes" value="${cfg.autoStopMinutes||0}" min="0"/></div>
-                        <div class="cfg-field"><label class="cfg-label">Start Message</label><input class="cfg-input" type="text" name="loopStartMsg" value="${esc(cfg.loopStartMsg||'')}" placeholder="Sent when loop starts"/></div>
-                        <div class="cfg-field"><label class="cfg-label">Stop Message</label><input class="cfg-input" type="text" name="loopStopMsg" value="${esc(cfg.loopStopMsg||'')}" placeholder="Sent when loop stops"/></div>
-                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="reactOnly" name="reactOnlyMode" value="1" ${cfg.reactOnlyMode?"checked":""}><label for="reactOnly">React-only mode (no images)</label></div>
+                        <div class="cfg-field"><label class="cfg-label">Start Message</label><input class="cfg-input" type="text" name="loopStartMsg" value="${esc(cfg.loopStartMsg||'')}" placeholder="Sent when loop starts (blank = none)"/></div>
+                        <div class="cfg-field"><label class="cfg-label">Stop Message</label><input class="cfg-input" type="text" name="loopStopMsg" value="${esc(cfg.loopStopMsg||'')}" placeholder="Sent when loop stops (blank = none)"/></div>
+                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="reactOnly" name="reactOnlyMode" value="1" ${cfg.reactOnlyMode?"checked":""}><label for="reactOnly">React-only mode (no images in loop)</label></div>
                     </div>
                 </div>
             </div>
             <div>
-                <div class="section-label">General Settings</div>
+                <div class="section-label">PM Loop</div>
                 <div class="panel">
-                    <div class="ph"><span class="pbadge pbadge-g">GENERAL</span><span class="ph-title">Bot Behavior</span></div>
+                    <div class="ph"><span class="pbadge pbadge-g">PM</span><span class="ph-title">PM Loop Trigger</span></div>
                     <div class="cfg-body">
-                        <div class="cfg-field"><label class="cfg-label">TTS Language</label>
-                            <select class="cfg-select" name="ttsLang">
-                                ${[["tl","Tagalog"],["en","English"],["ja","Japanese"],["ko","Korean"],["zh","Chinese"],["es","Spanish"],["fr","French"],["de","German"]].map(([v,n])=>`<option value="${v}" ${cfg.ttsLang===v?"selected":""}>${n}</option>`).join("")}
-                            </select>
-                        </div>
-                        <div class="cfg-field"><label class="cfg-label">Welcome Message</label><input class="cfg-input" type="text" name="greetMsg" value="${esc(cfg.greetMsg||'Welcome! 👋')}" placeholder="For new members"/></div>
-                        <div class="cfg-field"><label class="cfg-label">Anti-Spam Max Msgs</label><input class="cfg-input" type="number" name="antiSpamMaxMsg" value="${cfg.antiSpamMaxMsg||5}" min="2"/></div>
-                        <div class="cfg-field"><label class="cfg-label">Anti-Spam Window (sec)</label><input class="cfg-input" type="number" name="antiSpamWindowSec" value="${cfg.antiSpamWindowSec||10}" min="3"/></div>
-                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="greetNew" name="greetNewMembers" value="1" ${cfg.greetNewMembers?"checked":""}><label for="greetNew">Greet new members</label></div>
-                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="antiSpam" name="antiSpamEnabled" value="1" ${cfg.antiSpamEnabled?"checked":""}><label for="antiSpam">Anti-spam auto-kick</label></div>
-                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="autoSeen" name="autoSeenEnabled" value="1" ${cfg.autoSeenEnabled?"checked":""}><label for="autoSeen">Auto mark seen</label></div>
-                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="typing" name="typingSimulate" value="1" ${cfg.typingSimulate?"checked":""}><label for="typing">Simulate typing</label></div>
-                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="silentMode" name="silentMode" value="1" ${cfg.silentMode?"checked":""}><label for="silentMode">Auto-respond with /silent (suppress notif — hides msgs from notif-based bots)</label></div>
-                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="loopSilentMode" name="loopSilentMode" value="1" ${cfg.loopSilentMode?"checked":""}><label for="loopSilentMode">Loop with /silent (suppress notif on loop messages — hides loop from notif-based bots)</label></div>
+                        <div class="cfg-hint" style="color:var(--ac2);font-size:12px;margin-bottom:10px">Use the dot trigger in any PM to start/stop loop.<br>Or send <code>. &lt;uid&gt;</code> / <code>. &lt;name&gt;</code> in any chat to loop a specific person's PM.</div>
+                        <div class="cfg-hint">Examples:<br><code>. 61234567890</code> → loop PM by UID<br><code>. John</code> → search friends, loop by name<br><code>!looppm &lt;uid&gt;</code> → start PM loop via command<br><code>!stoppm &lt;uid&gt;</code> → stop PM loop</div>
                     </div>
                 </div>
             </div>
         </div>
-        <div style="display:flex;justify-content:center;margin-top:4px">
-            <button class="btn-save" type="submit">▶ Save All Configuration</button>
+    </div>
+
+    <!-- ── AUTO-RESPOND ── -->
+    <div class="cfg-cat" id="cat-autorespond" style="display:none">
+        <div class="two-col">
+            <div>
+                <div class="section-label">Auto-Respond</div>
+                <div class="panel">
+                    <div class="ph"><span class="pbadge">AUTO</span><span class="ph-title">Auto-Respond Behavior</span></div>
+                    <div class="cfg-body">
+                        <div class="cfg-hint" style="color:var(--ac2);font-size:12px;margin-bottom:12px">Enable with <code>!on</code> in a group chat. Disable with <code>!off</code>.</div>
+                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="greetNew" name="greetNewMembers" value="1" ${cfg.greetNewMembers?"checked":""}><label for="greetNew">Greet new members when they join</label></div>
+                        <div class="cfg-field"><label class="cfg-label">Welcome Message</label><input class="cfg-input" type="text" name="greetMsg" value="${esc(cfg.greetMsg||'Welcome! 👋')}" placeholder="For new members"/></div>
+                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="autoSeen" name="autoSeenEnabled" value="1" ${cfg.autoSeenEnabled?"checked":""}><label for="autoSeen">Auto mark messages as seen</label></div>
+                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="typing" name="typingSimulate" value="1" ${cfg.typingSimulate?"checked":""}><label for="typing">Simulate typing indicator</label></div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="section-label">Anti-Spam</div>
+                <div class="panel">
+                    <div class="ph"><span class="pbadge pbadge-p">SPAM</span><span class="ph-title">Anti-Spam Settings</span></div>
+                    <div class="cfg-body">
+                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="antiSpam" name="antiSpamEnabled" value="1" ${cfg.antiSpamEnabled?"checked":""}><label for="antiSpam">Anti-spam auto-kick (groups)</label></div>
+                        <div class="cfg-field"><label class="cfg-label">Max Messages Before Kick</label><input class="cfg-input" type="number" name="antiSpamMaxMsg" value="${cfg.antiSpamMaxMsg||5}" min="2"/></div>
+                        <div class="cfg-field"><label class="cfg-label">Detection Window (seconds)</label><input class="cfg-input" type="number" name="antiSpamWindowSec" value="${cfg.antiSpamWindowSec||10}" min="3"/></div>
+                    </div>
+                </div>
+            </div>
         </div>
-        </form>`;
+    </div>
+
+    <!-- ── AUTO-REACT ── -->
+    <div class="cfg-cat" id="cat-react" style="display:none">
+        <div class="two-col">
+            <div>
+                <div class="section-label">Auto-React</div>
+                <div class="panel">
+                    <div class="ph"><span class="pbadge">REACT</span><span class="ph-title">Auto-React to Every Message</span></div>
+                    <div class="cfg-body">
+                        <div class="cfg-hint" style="color:var(--ac2);font-size:12px;margin-bottom:12px">Bot will automatically react to every incoming message with the configured emoji.</div>
+                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="autoReactEnabled" name="autoReactEnabled" value="1" ${cfg.autoReactEnabled?"checked":""}><label for="autoReactEnabled">Enable auto-react on all incoming messages</label></div>
+                        <div class="cfg-field"><label class="cfg-label">Reaction Emoji</label><input class="cfg-input" type="text" name="autoReactEmoji" value="${esc(cfg.autoReactEmoji||'😆')}" maxlength="8"/><div class="cfg-hint">Emoji the bot will react with</div></div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="section-label">Loop Reactions</div>
+                <div class="panel">
+                    <div class="ph"><span class="pbadge pbadge-g">LOOP</span><span class="ph-title">Loop Message Reactions</span></div>
+                    <div class="cfg-body">
+                        <div class="cfg-hint" style="color:var(--tx3);font-size:12px;margin-bottom:12px">The bot reacts to its own loop messages with the Loop Reaction Emoji configured in the Loop tab.</div>
+                        <div class="cfg-hint">Current loop reaction: <b style="color:var(--ac2)">${esc(cfg.loopReact||'😆')}</b><br>Change it in the <b>Loop</b> category above.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── SILENT MODE ── -->
+    <div class="cfg-cat" id="cat-silent" style="display:none">
+        <div class="two-col">
+            <div>
+                <div class="section-label">Silent Mode</div>
+                <div class="panel">
+                    <div class="ph"><span class="pbadge">SILENT</span><span class="ph-title">Suppress Notifications</span></div>
+                    <div class="cfg-body">
+                        <div class="cfg-hint" style="color:var(--ac2);font-size:12px;margin-bottom:12px">Silent mode sends messages without triggering push notifications — helps avoid detection by notification-based bots.</div>
+                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="silentMode" name="silentMode" value="1" ${cfg.silentMode?"checked":""}><label for="silentMode">Auto-respond with silent mode</label></div>
+                        <div class="cfg-toggle"><input class="cfg-check" type="checkbox" id="loopSilentMode" name="loopSilentMode" value="1" ${cfg.loopSilentMode?"checked":""}><label for="loopSilentMode">Loop messages with silent mode</label></div>
+                        <div class="cfg-hint" style="margin-top:10px;color:var(--muted)">Silent mode uses the /silent prefix method — Facebook strips the prefix and delivers without notification.</div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="section-label">How Silent Works</div>
+                <div class="panel">
+                    <div class="ph"><span class="pbadge pbadge-p">INFO</span><span class="ph-title">About Silent Messages</span></div>
+                    <div class="cfg-body">
+                        <div class="cfg-hint" style="font-size:12px;color:var(--tx2);line-height:1.8">
+                            ✅ Delivered normally — recipient can still read it<br>
+                            🔕 No push notification on the recipient's device<br>
+                            👻 The /silent prefix is hidden — chat looks clean<br>
+                            🤖 Bypasses bots that trigger on new notifications
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── SECURITY ── -->
+    <div class="cfg-cat" id="cat-security" style="display:none">
+        <div class="two-col">
+            <div>
+                <div class="section-label">Group Lock</div>
+                <div class="panel">
+                    <div class="ph"><span class="pbadge">LOCK</span><span class="ph-title">Protection Settings</span></div>
+                    <div class="cfg-body">
+                        <div class="cfg-hint" style="color:var(--ac2);font-size:12px;margin-bottom:12px">All locks restore near-instantly (&lt;80ms) when someone tries to change them.</div>
+                        <div class="cfg-hint" style="font-size:12px;color:var(--tx2);line-height:2">
+                            <code>!nn &lt;name&gt;</code> → lock all nicknames<br>
+                            <code>!nn1 &lt;uid&gt; &lt;name&gt;</code> → lock one nickname<br>
+                            <code>!clearnn</code> → remove nickname lock<br>
+                            <code>!cg &lt;name&gt;</code> → lock group name<br>
+                            <code>!uncg</code> → unlock group name<br>
+                            <code>!banner [url]</code> → lock group photo<br>
+                            <code>!unbanner</code> → unlock group photo<br>
+                            <code>!freeze / !unfreeze</code> → kick non-admins<br>
+                            <code>!gmute / !gunmute &lt;uid&gt;</code> → kick if chat
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="section-label">Anti-Restrict</div>
+                <div class="panel">
+                    <div class="ph"><span class="pbadge pbadge-p">ANTI</span><span class="ph-title">Anti-Restrict</span></div>
+                    <div class="cfg-body">
+                        <div class="cfg-hint" style="font-size:12px;color:var(--tx2);line-height:2">
+                            <code>!antirestrict</code> → toggle notification when bot gets kicked<br>
+                            <code>!promote / !demote &lt;uid&gt;</code> → manage group admins<br>
+                            <code>!perms &lt;uid&gt; &lt;time&gt;</code> → grant temp permissions<br>
+                            <code>!revoke [uid]</code> → remove permissions<br>
+                            <code>!gmute &lt;uid&gt;</code> → silently kick user on next message
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── VOICE / TTS ── -->
+    <div class="cfg-cat" id="cat-voice" style="display:none">
+        <div class="two-col">
+            <div>
+                <div class="section-label">Voice / TTS</div>
+                <div class="panel">
+                    <div class="ph"><span class="pbadge">TTS</span><span class="ph-title">Text-to-Speech Settings</span></div>
+                    <div class="cfg-body">
+                        <div class="cfg-field"><label class="cfg-label">TTS Language</label>
+                            <select class="cfg-select" name="ttsLang">
+                                ${[["tl","Tagalog"],["en","English"],["ja","Japanese"],["ko","Korean"],["zh","Chinese"],["es","Spanish"],["fr","French"],["de","German"],["it","Italian"],["pt","Portuguese"],["th","Thai"],["vi","Vietnamese"],["id","Indonesian"]].map(([v,n])=>`<option value="${v}" ${cfg.ttsLang===v?"selected":""}>${n}</option>`).join("")}
+                            </select>
+                            <div class="cfg-hint">Language used for !vm and !vmpm commands</div>
+                        </div>
+                        <div class="cfg-hint" style="margin-top:14px;font-size:12px;color:var(--tx2);line-height:2">
+                            <code>!vm &lt;text&gt;</code> → send voice message in current chat<br>
+                            <code>!vmpm &lt;uid&gt; &lt;text&gt;</code> → send voice to a specific PM
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <div class="section-label">Scheduled Messages</div>
+                <div class="panel">
+                    <div class="ph"><span class="pbadge pbadge-g">SCHED</span><span class="ph-title">Schedule Command</span></div>
+                    <div class="cfg-body">
+                        <div class="cfg-hint" style="font-size:12px;color:var(--tx2);line-height:2">
+                            <code>!schedule &lt;sec&gt; &lt;msg&gt;</code><br>
+                            Sends a message after a delay of 1–3600 seconds.<br>
+                            <br>
+                            Example: <code>!schedule 60 hello</code><br>
+                            Sends "hello" after 60 seconds.
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div style="display:flex;justify-content:center;margin-top:4px">
+        <button class="btn-save" type="submit">▶ Save All Configuration</button>
+    </div>
+    </form>
+    <script>
+    function showCat(id, btn) {
+        document.querySelectorAll('.cfg-cat').forEach(el=>el.style.display='none');
+        document.querySelectorAll('.cfg-tab').forEach(el=>el.classList.remove('active'));
+        document.getElementById('cat-'+id).style.display='block';
+        btn.classList.add('active');
+    }
+    </script>`;
 
     // ── PAGE: SESSION ─────────────────────────────────────────────────
     const botStatusCards = state.bots.length===0
@@ -321,7 +505,7 @@ function buildHTML(tab) {
                 <div class="panel">
                     <div class="ph"><span class="pbadge pbadge-g">UPDATE</span><span class="ph-title">Update fbstate.json</span></div>
                     <div style="padding:16px">
-                        <div class="cfg-hint" style="margin-bottom:10px;color:#fbbf24">⚠️ Make sure it's a JSON array starting with <code>[</code> and ending with <code>]</code>. The bot restarts automatically after saving.</div>
+                        <div class="cfg-hint" style="margin-bottom:10px;color:#fbbf24">⚠️ Must be a JSON array starting with <code>[</code> and ending with <code>]</code>.</div>
                         <form method="POST" action="/api/fbstate/update?tab=session" id="cookieForm">
                             <textarea class="cookie-area" name="fbstate" id="cookieArea"
                                 placeholder='Paste fbstate JSON here&#10;[&#10;  {"key":"c_user","value":"..."},&#10;  {"key":"xs","value":"..."},&#10;  ...&#10;]'
@@ -332,7 +516,7 @@ function buildHTML(tab) {
                                 <button class="btn-cookie-clear" type="button" onclick="document.getElementById('cookieArea').value='';document.getElementById('cookiePreview').style.display='none'">✕ Clear</button>
                             </div>
                         </form>
-                        <div class="cfg-hint" style="margin-top:10px">After saving, wait ~10s for the bot to reconnect. Check the Dashboard tab for the new status.</div>
+                        <div class="cfg-hint" style="margin-top:10px">After saving, wait ~10s for the bot to reconnect.</div>
                     </div>
                 </div>
             </div>
@@ -363,9 +547,14 @@ function buildHTML(tab) {
 
     // ── PAGE: COMMANDS ────────────────────────────────────────────────
     const CMDS = [
-        {sec:"Loop (dot trigger — groups & PMs)",rows:[
-            [". (dot)","Toggle loop ON or OFF in any chat (group or PM)"],
-            ["!status","Show current loop + auto-respond status"],
+        {sec:"Loop",rows:[
+            [". (dot)","Toggle loop ON/OFF in current chat (group or PM)"],
+            [". &lt;uid&gt;","Toggle PM loop with a specific Facebook UID"],
+            [". &lt;name&gt;","Search friends by name and toggle their PM loop"],
+            ["!stop","Force-stop the loop in current thread"],
+            ["!looppm &lt;uid&gt;","Start loop in PM with a specific UID"],
+            ["!stoppm &lt;uid&gt;","Stop PM loop with a specific UID"],
+            ["!schedule &lt;sec&gt; &lt;msg&gt;","Send a message after N seconds (1–3600)"],
         ]},
         {sec:"Auto-Respond (groups only)",rows:[
             ["!on","Enable auto-respond — replies to every incoming message"],
@@ -375,36 +564,49 @@ function buildHTML(tab) {
             ["!broadcast &lt;text&gt;","Send a message to all auto-respond active threads"],
         ]},
         {sec:"Group Management",rows:[
-            ["!nn &lt;name&gt;","Nickname all members + lock the nickname"],
-            ["!cg &lt;name&gt;","Change group name + lock it"],
-            ["!banner [url]","Set and lock the group photo"],
+            ["!nn &lt;name&gt;","Set + lock nickname for ALL members (slow set, instant restore)"],
+            ["!nn1 &lt;uid&gt; &lt;name&gt;","Set + lock nickname for ONE member"],
+            ["!clearnn","Clear and unlock all nicknames"],
+            ["!cg &lt;name&gt;","Change + lock group name (instant restore)"],
+            ["!uncg","Unlock group name"],
+            ["!banner [url]","Set + lock group photo (instant restore)"],
+            ["!unbanner","Unlock group photo"],
             ["!kick &lt;uid&gt;","Remove a member from the group"],
             ["!add &lt;uid&gt;","Add someone to the group"],
+            ["!promote &lt;uid&gt;","Make a member a group admin"],
+            ["!demote &lt;uid&gt;","Remove a member's admin status"],
             ["!emoji &lt;emoji&gt;","Change the group emoji"],
             ["!color &lt;name&gt;","Change chat color (blue, pink, green, etc.)"],
-            ["!freeze / !unfreeze","Freeze group — anyone who chats gets kicked"],
+            ["!freeze / !unfreeze","Freeze group — non-admins who chat get kicked"],
+            ["!gmute &lt;uid&gt;","Kick user silently on their next message"],
+            ["!gunmute &lt;uid&gt;","Remove gmute"],
+            ["!members","List all member UIDs"],
+            ["!info","Show group info (name, members, admins, status)"],
             ["!lock","Show all active protections"],
         ]},
-        {sec:"Permissions",rows:[
-            ["!perms &lt;uid&gt; &lt;time&gt;","Grant temp permissions (e.g. 30s, 5min, 1h)"],
-            ["!revoke [uid]","Remove temp permissions"],
-            ["!gp &lt;url&gt; / !gp off","Lock profile picture — restores every 5min"],
-            ["!antirestrict","Get notified when bot is kicked from a group"],
-            ["!antichat","Auto-retry failed message sends"],
-        ]},
-        {sec:"Utilities",rows:[
+        {sec:"Voice & Messages",rows:[
+            ["!vm &lt;text&gt;","Send a TTS voice message in current chat"],
+            ["!vmpm &lt;uid&gt; &lt;text&gt;","Send a TTS voice message to someone's PM"],
             ["!say &lt;text&gt;","Make the bot send a message"],
-            ["!vm &lt;text&gt;","Send a voice message via TTS"],
             ["!spam &lt;n&gt; &lt;msg&gt;","Send a message n times (max 20)"],
-            ["!seen","Mark all messages as seen"],
+            ["!forward &lt;tid&gt; &lt;msg&gt;","Send a message to another thread ID"],
+            ["!react &lt;emoji&gt;","React to a replied message"],
             ["!count","Count 1 to 20 in the chat"],
-            ["!info","Show group info (name, members, IDs, status)"],
+            ["!repeat &lt;n&gt; &lt;text&gt;","Send a message stacked n times (max 10)"],
+        ]},
+        {sec:"Permissions & Tools",rows:[
+            ["!perms &lt;uid&gt; &lt;time&gt;","Grant temp permissions (e.g. 30s, 5min, 1h)"],
+            ["!revoke [uid]","Remove temp permissions (blank = revoke all)"],
+            ["!gp &lt;url&gt; / !gp off","Lock profile picture — restores every 5min"],
+            ["!antirestrict","Toggle notification when bot is kicked"],
+            ["!seen","Mark all messages as seen"],
             ["!id","Get UID of a replied message's sender"],
             ["!myid","Show your own Facebook ID"],
-            ["!test","Ping the bot"],
-            ["!help","Show the full command list inside Messenger"],
+            ["!status","Show loop + auto-respond status for this thread"],
+            ["!test","Ping the bot — responds 'pong. still alive.'"],
+            ["!help","Show command list inside Messenger"],
         ]},
-        {sec:"Fun / Unexpected",rows:[
+        {sec:"Fun",rows:[
             ["!flip","Flip a coin — heads or tails"],
             ["!roll [sides]","Roll a dice, default 6-sided"],
             ["!8ball &lt;question&gt;","Ask the magic 8 ball"],
@@ -412,9 +614,8 @@ function buildHTML(tab) {
             ["!reverse &lt;text&gt;","Send text backwards"],
             ["!shout &lt;text&gt;","LOUD spaced-out ALL CAPS"],
             ["!mock &lt;text&gt;","aLtErNaTiNg cAsE (spongebob mode)"],
-            ["!clap &lt;text&gt;","Put claps between each word"],
+            ["!clap &lt;text&gt;","Put claps 👏 between each word"],
             ["!timer &lt;sec&gt;","Set a countdown — bot pings when done"],
-            ["!repeat &lt;n&gt; &lt;text&gt;","Send a message stacked n times (max 10)"],
         ]},
     ];
 
@@ -422,22 +623,14 @@ function buildHTML(tab) {
         <div class="panel" style="margin-bottom:14px">
             <div class="ph"><span class="pbadge pbadge-p">${sec.sec.split(" ")[0].toUpperCase()}</span><span class="ph-title">${sec.sec}</span></div>
             <table>
-                <thead><tr><th style="width:220px">Command</th><th>Description</th></tr></thead>
+                <thead><tr><th style="width:240px">Command</th><th>Description</th></tr></thead>
                 <tbody>${sec.rows.map(([c,d])=>`<tr><td class="tc">${c}</td><td class="td2">${d}</td></tr>`).join("")}</tbody>
             </table>
         </div>`).join("");
 
     const pageCommands = `
         <div class="section-label">Command Reference</div>
-        ${cmdSections}
-        <div class="notice-box" style="margin-top:0">
-            <div class="nb-title">Trigger Summary</div>
-            <p style="color:#8b95c0;font-size:12.5px;line-height:1.7">
-                <code>. (dot)</code> — Toggles the <b>loop</b> ON/OFF in any chat (group or PM)<br>
-                <code>!on</code> / <code>!off</code> — Toggles <b>auto-respond</b> — groups ONLY<br>
-                All other <code>!</code> commands — require developer or temp permissions
-            </p>
-        </div>`;
+        ${cmdSections}`;
 
     // ── PAGES MAP ─────────────────────────────────────────────────────
     const pages = {dashboard:pageDashboard, loop:pageLoop, config:pageConfig, session:pageSession, commands:pageCommands};
@@ -489,8 +682,9 @@ body{background:var(--bg);color:var(--tx);font-family:var(--sans);font-size:13.5
 .nav-bar{
   height:44px;flex-shrink:0;
   background:var(--s1);border-bottom:1px solid var(--b0);
-  display:flex;align-items:stretch;padding:0 12px;gap:2px;
+  display:flex;align-items:stretch;padding:0 12px;gap:2px;overflow-x:auto;
 }
+.nav-bar::-webkit-scrollbar{display:none}
 .nav-item{
   display:flex;align-items:center;gap:7px;padding:0 16px;
   font-size:12px;font-weight:500;color:var(--tx3);text-decoration:none;
@@ -600,6 +794,14 @@ tr:hover td{background:#ffffff02}
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}
 @media(max-width:800px){.two-col{grid-template-columns:1fr}}
 
+/* ── CONFIG CATEGORY TABS ── */
+.cfg-tabs-wrap{overflow-x:auto;margin-bottom:18px;-webkit-overflow-scrolling:touch}
+.cfg-tabs-wrap::-webkit-scrollbar{display:none}
+.cfg-tabs{display:flex;gap:6px;min-width:max-content;padding-bottom:4px}
+.cfg-tab{background:var(--s2);border:1px solid var(--b1);border-radius:7px;padding:8px 16px;font-size:12px;font-weight:500;color:var(--tx3);cursor:pointer;transition:all .15s;white-space:nowrap;font-family:var(--sans)}
+.cfg-tab:hover{color:var(--tx2);border-color:var(--b2)}
+.cfg-tab.active{background:var(--s3);border-color:var(--ac);color:var(--ac2)}
+
 /* ── CONFIG FORM ── */
 .cfg-body{padding:14px 15px}
 .cfg-field{margin-bottom:13px}
@@ -644,9 +846,7 @@ code{background:var(--s2);border:1px solid var(--b1);border-radius:4px;padding:1
 
 /* ── NOTICE ── */
 .notice{color:var(--tx3);font-size:12.5px;padding:20px;text-align:center}
-
-/* auto-refresh for dashboard only */
-${t==="dashboard"?`<meta http-equiv="refresh" content="10"/>`:""}
+${t==="dashboard"?`<style>.auto-r{display:none}</style><meta http-equiv="refresh" content="10"/>`:``}
 </style>
 </head>
 <body>
@@ -658,7 +858,7 @@ ${t==="dashboard"?`<meta http-equiv="refresh" content="10"/>`:""}
       <div class="logo-sq"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a2 2 0 0 1 2 2v1h1a3 3 0 0 1 3 3v1a2 2 0 0 1 0 4v1a3 3 0 0 1-3 3h-1v1a2 2 0 0 1-4 0v-1H9a3 3 0 0 1-3-3v-1a2 2 0 0 1 0-4V8a3 3 0 0 1 3-3h1V4a2 2 0 0 1 2-2z"/><circle cx="9" cy="11" r="1" fill="#fff"/><circle cx="15" cy="11" r="1" fill="#fff"/></svg></div>
       Cozy Bot
     </div>
-    <span class="ver-tag">v2.1</span>
+    <span class="ver-tag">v2.2</span>
   </div>
   <div class="tb-r">
     <span>dev <b>${esc(state.developerID||"—")}</b></span>
@@ -694,40 +894,35 @@ function startDashboard(port=5000) {
         }
 
         try {
-            // ── Add text reply
             if (path2==="/api/replies/add" && req.method==="POST") {
                 const p = await parseBody(req);
                 const w = (p.word||"").trim();
                 if(w){ const a=readCustomReplies(); a.push(w); writeCustomReplies(a); }
                 redirect(tab); return;
             }
-            // ── Remove text reply
             if (path2==="/api/replies/remove" && req.method==="POST") {
                 const p = await parseBody(req);
                 const idx = parseInt(p.index);
                 if(!isNaN(idx)){ const a=readCustomReplies(); if(idx>=0&&idx<a.length)a.splice(idx,1); writeCustomReplies(a); }
                 redirect(tab); return;
             }
-            // ── Add image URL
             if (path2==="/api/images/add" && req.method==="POST") {
                 const p = await parseBody(req);
                 const u = (p.url||"").trim();
                 if(u&&u.startsWith("http")){ const a=readImageReplies(); a.push(u); writeImageReplies(a); }
                 redirect(tab); return;
             }
-            // ── Remove image URL
             if (path2==="/api/images/remove" && req.method==="POST") {
                 const p = await parseBody(req);
                 const idx = parseInt(p.index);
                 if(!isNaN(idx)){ const a=readImageReplies(); if(idx>=0&&idx<a.length)a.splice(idx,1); writeImageReplies(a); }
                 redirect(tab); return;
             }
-            // ── Save config
             if (path2==="/api/config/save" && req.method==="POST") {
                 const p = await parseBody(req);
                 const cfg = readBotConfig();
                 if(p.loopReact!==undefined)        cfg.loopReact         = p.loopReact.trim()||"😆";
-                if(p.loopDelay!==undefined)        cfg.loopDelay         = Math.max(1,parseInt(p.loopDelay)||5);
+                if(p.loopDelay!==undefined)        cfg.loopDelay         = Math.max(1,parseInt(p.loopDelay)||1);
                 if(p.imageProbability!==undefined) cfg.imageProbability  = Math.min(100,Math.max(0,parseInt(p.imageProbability)||20));
                 if(p.loopMode!==undefined)         cfg.loopMode          = ["sequential","shuffle"].includes(p.loopMode)?p.loopMode:"sequential";
                 if(p.loopStartMsg!==undefined)     cfg.loopStartMsg      = p.loopStartMsg.trim();
@@ -745,13 +940,13 @@ function startDashboard(port=5000) {
                 cfg.typingSimulate   = p.typingSimulate==="1";
                 cfg.silentMode       = p.silentMode==="1";
                 cfg.loopSilentMode   = p.loopSilentMode==="1";
+                cfg.autoReactEnabled = p.autoReactEnabled==="1";
+                if(p.autoReactEmoji!==undefined)   cfg.autoReactEmoji    = p.autoReactEmoji.trim()||"😆";
                 writeBotConfig(cfg);
                 redirect(tab); return;
             }
-            // ── Update fbstate (cookie) — reads raw body, parses form manually
             if (path2==="/api/fbstate/update" && req.method==="POST") {
                 const raw = await readRawBody(req);
-                // find the fbstate= field from raw form body
                 const eqIdx = raw.indexOf("fbstate=");
                 let jsonStr = "";
                 if (eqIdx !== -1) {
@@ -768,12 +963,10 @@ function startDashboard(port=5000) {
                 addLog("info","✅ fbstate updated from dashboard — bot reconnecting...");
                 redirect(tab); return;
             }
-            // ── State JSON API
             if (path2==="/api/state" && req.method==="GET") {
                 res.writeHead(200,{"Content-Type":"application/json"});
                 res.end(JSON.stringify({logs,state})); return;
             }
-            // ── Main page
             let html;
             try { html = buildHTML(tab); }
             catch(e) {

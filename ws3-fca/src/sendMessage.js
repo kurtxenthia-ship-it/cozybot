@@ -429,8 +429,8 @@ module.exports = function (defaultFuncs, api, ctx) {
       replied_to_message_id: replyToMessage
     };
 
-    if (msg.silent) {
-      form["tags[0]"] = "silent_message";
+    if (msg.silent && form["body"] !== undefined) {
+      form["body"] = "/silent " + form["body"];
     }
 
     handleLocation(msg, form, callback, () =>
