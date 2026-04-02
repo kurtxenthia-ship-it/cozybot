@@ -716,8 +716,11 @@ body{background:var(--bg);color:var(--t1);font-family:var(--sans);font-size:13.5
 .logo-mark svg{color:#fff}
 .logo-text{font-weight:800;font-size:14.5px;color:var(--t1);letter-spacing:-.02em;background:linear-gradient(135deg,var(--bl3),var(--cy2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .logo-badge{font-size:9px;font-weight:700;color:var(--t3);background:var(--s3);border:1px solid var(--b3);border-radius:5px;padding:2px 8px;letter-spacing:.12em;text-transform:uppercase;font-family:var(--mono)}
-.tb-right{margin-left:auto;display:flex;align-items:center;gap:16px;font-size:11px;font-family:var(--mono);color:var(--t3)}
+.tb-right{margin-left:auto;display:flex;align-items:center;gap:12px;font-size:11px;font-family:var(--mono);color:var(--t3)}
 .tb-right b{color:var(--bl3)}
+.tb-cookie-btn{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:7px;background:var(--s3);border:1px solid var(--b3);color:var(--t3);font-size:11px;font-weight:600;font-family:var(--sans);text-decoration:none;transition:all .15s;white-space:nowrap;cursor:pointer}
+.tb-cookie-btn:hover{background:var(--s4);border-color:var(--bl);color:var(--bl2)}
+.tb-cookie-btn svg{flex-shrink:0}
 .live-dot{display:flex;align-items:center;gap:5px}
 .ld{width:6px;height:6px;border-radius:50%;background:var(--gn3);box-shadow:0 0 8px var(--gn3);animation:pulse 2.5s ease-in-out infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.2}}
@@ -972,7 +975,11 @@ ${t==="dashboard"?`<meta http-equiv="refresh" content="10"/>`:``}
         <span class="logo-badge">v2.2</span>
     </div>
     <div class="tb-right">
-        <span>dev <b>${esc(state.developerID||"—")}</b></span>
+        <span class="tb-dev">dev <b>${esc(state.developerID||"—")}</b></span>
+        <a href="/" class="tb-cookie-btn">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Change Cookie
+        </a>
         <div class="live-dot"><div class="ld"></div>${t==="dashboard"?"auto-refresh 10s":"static"}</div>
     </div>
 </div>
