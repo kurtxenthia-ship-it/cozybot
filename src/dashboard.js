@@ -986,14 +986,294 @@ ${t==="dashboard"?`<meta http-equiv="refresh" content="10"/>`:``}
 </html>`;
 }
 
+function buildIntro() {
+    const hasFbstate = (() => { try { const d = JSON.parse(fs.readFileSync(FBSTATE_FILE,"utf8")); return Array.isArray(d)&&d.length>0; } catch(_){ return false; } })();
+    const existingCUser = (() => { try { const d = JSON.parse(fs.readFileSync(FBSTATE_FILE,"utf8")); const c=d.find(x=>x.key==="c_user"); return c?c.value:""; } catch(_){ return ""; } })();
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Cozy Bot — Connect</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#060c17;--s1:#0a1220;--s2:#0e1a2e;--s3:#132038;
+  --b1:#172035;--b2:#1e2d45;--b3:#253652;
+  --t1:#e8edf5;--t2:#8fa3be;--t3:#4e6585;--t4:#2d4060;
+  --bl:#3b82f6;--bl2:#60a5fa;--cy:#06b6d4;--cy2:#22d3ee;
+  --gn:#059669;--gn2:#10b981;--gn3:#34d399;
+  --rd:#e11d48;--rd2:#f43f5e;--rd3:#fb7185;
+  --yw:#d97706;--yw2:#f59e0b;--yw3:#fbbf24;
+  --pu:#7c3aed;
+  --mono:'JetBrains Mono',monospace;--sans:'Inter',sans-serif;
+  --r:10px;--r2:14px;--r3:20px;
+  --shadow-xl:0 8px 40px #00000060,0 2px 8px #0005;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg)}
+body{font-family:var(--sans);color:var(--t1);display:flex;align-items:center;justify-content:center;position:relative}
+
+/* ── ANIMATED BG ── */
+.bg-layer{position:fixed;inset:0;pointer-events:none;overflow:hidden}
+.bg-orb{position:absolute;border-radius:50%;filter:blur(90px);opacity:.12;animation:drift 14s ease-in-out infinite alternate}
+.bg-orb-1{width:500px;height:400px;top:-100px;left:-150px;background:#2563eb;animation-delay:0s}
+.bg-orb-2{width:400px;height:350px;bottom:-80px;right:-100px;background:#7c3aed;animation-delay:-5s}
+.bg-orb-3{width:300px;height:250px;top:40%;left:40%;background:#06b6d4;animation-delay:-9s;opacity:.07}
+@keyframes drift{from{transform:translate(0,0) scale(1)}to{transform:translate(30px,20px) scale(1.06)}}
+
+/* ── GRID BG ── */
+.bg-grid{position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(var(--b1) 1px,transparent 1px),linear-gradient(90deg,var(--b1) 1px,transparent 1px);background-size:40px 40px;opacity:.25}
+
+/* ── CARD ── */
+.card{position:relative;z-index:10;width:100%;max-width:560px;background:var(--s1);border:1px solid var(--b2);border-radius:var(--r3);padding:44px;box-shadow:var(--shadow-xl);overflow:hidden;margin:20px}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#1d4ed8,#7c3aed 50%,#06b6d4)}
+
+/* ── LOGO ── */
+.logo-wrap{display:flex;align-items:center;gap:14px;margin-bottom:32px}
+.logo-icon{width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#1d4ed8,#7c3aed);display:flex;align-items:center;justify-content:center;box-shadow:0 0 28px #3b82f628,0 4px 16px #0005;flex-shrink:0}
+.logo-name{font-size:22px;font-weight:900;letter-spacing:-.04em;background:linear-gradient(135deg,#93c5fd,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.logo-ver{font-size:9px;font-weight:700;color:var(--t3);font-family:var(--mono);background:var(--s3);border:1px solid var(--b3);border-radius:4px;padding:2px 7px;letter-spacing:.12em;display:block;margin-top:3px}
+
+/* ── HEADING ── */
+.heading{font-size:28px;font-weight:900;letter-spacing:-.05em;margin-bottom:6px;color:var(--t1)}
+.sub{font-size:13.5px;color:var(--t3);margin-bottom:28px;line-height:1.6}
+
+/* ── EXISTING COOKIE NOTICE ── */
+.existing-notice{background:var(--s2);border:1px solid #05966920;border-radius:var(--r);padding:12px 16px;margin-bottom:20px;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--gn3)}
+.existing-notice svg{flex-shrink:0;color:var(--gn3)}
+.en-text b{color:var(--t1)}
+
+/* ── STEPS ── */
+.steps{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:24px}
+@media(max-width:480px){.steps{grid-template-columns:1fr}}
+.step{display:flex;align-items:flex-start;gap:10px;background:var(--s2);border:1px solid var(--b1);border-radius:var(--r);padding:11px 13px}
+.step-n{width:20px;height:20px;border-radius:5px;background:linear-gradient(135deg,#1d4ed8,#7c3aed);color:#fff;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-family:var(--mono)}
+.step-t{font-size:11.5px;color:var(--t2);line-height:1.6}
+.step-t b{color:var(--t1)}
+
+/* ── TEXTAREA ── */
+.ta-wrap{position:relative;margin-bottom:12px}
+.ta{width:100%;background:var(--bg);border:1.5px solid var(--b2);border-radius:var(--r2);padding:14px 40px 14px 14px;color:var(--t1);font-family:var(--mono);font-size:11px;outline:none;resize:none;height:150px;transition:border-color .2s,box-shadow .2s;line-height:1.7}
+.ta:focus{border-color:var(--bl);box-shadow:0 0 0 3px #3b82f618}
+.ta::placeholder{color:var(--t4)}
+.ta.state-valid{border-color:var(--gn2)!important;box-shadow:0 0 0 3px #05966915!important}
+.ta.state-expired{border-color:var(--yw2)!important;box-shadow:0 0 0 3px #d9780615!important}
+.ta.state-invalid{border-color:var(--rd2)!important;box-shadow:0 0 0 3px #e11d4815!important}
+.ta-paste-btn{position:absolute;top:10px;right:10px;background:var(--s3);border:1px solid var(--b3);border-radius:6px;padding:5px 8px;cursor:pointer;color:var(--t3);transition:all .15s;display:flex;align-items:center;gap:5px;font-size:10.5px;font-family:var(--sans);font-weight:500}
+.ta-paste-btn:hover{color:var(--t2);border-color:var(--b4)}
+
+/* ── STATUS BADGE ── */
+.status-badge{display:none;align-items:center;gap:8px;padding:10px 14px;border-radius:var(--r);font-size:12px;font-family:var(--mono);margin-bottom:14px;line-height:1.5}
+.sb-valid{background:#05966910;border:1px solid #05966925;color:var(--gn3)}
+.sb-expired{background:#d9780610;border:1px solid #d9780625;color:var(--yw3)}
+.sb-invalid{background:#e11d4810;border:1px solid #e11d4825;color:var(--rd3)}
+
+/* ── BUTTONS ── */
+.btn-row{display:flex;gap:10px}
+.btn-connect{flex:1;background:linear-gradient(135deg,#1d4ed8,#7c3aed);color:#fff;border:none;border-radius:var(--r2);padding:14px 24px;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s;font-family:var(--sans);display:flex;align-items:center;justify-content:center;gap:9px;box-shadow:0 4px 20px #3b82f640;letter-spacing:-.01em;position:relative;overflow:hidden}
+.btn-connect::after{content:'';position:absolute;inset:0;background:linear-gradient(135deg,transparent 30%,#ffffff12 70%,transparent);opacity:0;transition:opacity .2s}
+.btn-connect:hover::after{opacity:1}
+.btn-connect:hover{box-shadow:0 6px 30px #3b82f660;transform:translateY(-1px)}
+.btn-connect:disabled{opacity:.35;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-connect:disabled::after{display:none}
+.btn-skip{background:var(--s2);color:var(--t3);border:1px solid var(--b2);border-radius:var(--r2);padding:14px 18px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;font-family:var(--sans);white-space:nowrap}
+.btn-skip:hover{border-color:var(--b3);color:var(--t2)}
+
+/* ── FOOTER ── */
+.card-foot{margin-top:18px;text-align:center;font-size:11px;color:var(--t4);font-family:var(--mono)}
+.card-foot a{color:var(--bl2);text-decoration:none}
+
+/* ── SPINNER ── */
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{width:16px;height:16px;border:2px solid #ffffff40;border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+</style>
+</head>
+<body>
+<div class="bg-layer">
+    <div class="bg-orb bg-orb-1"></div>
+    <div class="bg-orb bg-orb-2"></div>
+    <div class="bg-orb bg-orb-3"></div>
+</div>
+<div class="bg-grid"></div>
+
+<div class="card">
+    <div class="logo-wrap">
+        <div class="logo-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><circle cx="8.5" cy="15.5" r=".7" fill="white"/><circle cx="15.5" cy="15.5" r=".7" fill="white"/></svg>
+        </div>
+        <div>
+            <div class="logo-name">Cozy Bot</div>
+            <span class="logo-ver">v2.2</span>
+        </div>
+    </div>
+
+    <h1 class="heading">Enter Your Cookie</h1>
+    <p class="sub">Paste your Facebook <code style="background:#132038;border:1px solid #253652;border-radius:4px;padding:1px 7px;font-family:var(--mono);font-size:11.5px;color:#22d3ee">fbstate</code> JSON — the system will verify it before connecting.</p>
+
+    ${hasFbstate&&existingCUser?`
+    <div class="existing-notice">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        <div class="en-text">Cookie already saved — <b>c_user: ${esc(existingCUser)}</b> &nbsp;·&nbsp; You can skip or replace it below.</div>
+    </div>`:""}
+
+    <div class="steps">
+        <div class="step"><div class="step-n">1</div><div class="step-t">Install <b>Cookie Editor</b> on Chrome or Firefox</div></div>
+        <div class="step"><div class="step-n">2</div><div class="step-t">Log in to Facebook as the <b>bot account</b></div></div>
+        <div class="step"><div class="step-n">3</div><div class="step-t">Click Cookie Editor → <b>Export All</b> → copy JSON</div></div>
+        <div class="step"><div class="step-n">4</div><div class="step-t">Paste below — system verifies automatically</div></div>
+    </div>
+
+    <div class="ta-wrap">
+        <textarea class="ta" id="cookieTa" placeholder='[&#10;  {"key":"c_user","value":"100000..."},&#10;  {"key":"xs","value":"..."},&#10;  ...&#10;]' spellcheck="false"></textarea>
+        <button class="ta-paste-btn" type="button" onclick="pasteClip()" title="Paste from clipboard">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Paste
+        </button>
+    </div>
+
+    <div class="status-badge" id="statusBadge"></div>
+
+    <div class="btn-row">
+        <button class="btn-connect" id="connectBtn" disabled onclick="connectBot()">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.4 2 2 0 0 1 3.6 1.22h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6.1 6.1l.97-.97a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            Connect Bot
+        </button>
+        ${hasFbstate?`<button class="btn-skip" onclick="location.href='/?tab=dashboard'">Skip →</button>`:""}
+    </div>
+
+    <div class="card-foot">Cookie never leaves your server &nbsp;·&nbsp; <a href="/?tab=dashboard">Go to dashboard →</a></div>
+</div>
+
+<script>
+const ta  = document.getElementById('cookieTa');
+const btn = document.getElementById('connectBtn');
+const badge = document.getElementById('statusBadge');
+let validCookieStr = null;
+let checkTimer = null;
+
+function showBadge(cls, iconSvg, msg){
+    badge.className = 'status-badge ' + cls;
+    badge.style.display = 'flex';
+    badge.innerHTML = iconSvg + '<span style="flex:1">' + msg + '</span>';
+}
+function hideBadge(){ badge.style.display='none'; }
+const iconOk   = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><polyline points="20 6 9 17 4 12"/></svg>';
+const iconWarn = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>';
+const iconErr  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+
+function checkCookie(val) {
+    val = val.trim();
+    ta.className = 'ta';
+    hideBadge();
+    btn.disabled = true;
+    validCookieStr = null;
+    if (!val) return;
+
+    let arr;
+    try { arr = JSON.parse(val); } catch(e) {
+        ta.classList.add('state-invalid');
+        showBadge('status-badge sb-invalid', iconErr, 'Invalid JSON — ' + e.message);
+        return;
+    }
+    if (!Array.isArray(arr)) {
+        ta.classList.add('state-invalid');
+        showBadge('status-badge sb-invalid', iconErr, 'Must be a JSON array [ {...}, ... ]');
+        return;
+    }
+    const cUser = arr.find(c => c.key === 'c_user');
+    const xs    = arr.find(c => c.key === 'xs');
+    if (!cUser) {
+        ta.classList.add('state-invalid');
+        showBadge('status-badge sb-invalid', iconErr, 'Missing <b>c_user</b> cookie — not a valid fbstate');
+        return;
+    }
+    if (!xs) {
+        ta.classList.add('state-invalid');
+        showBadge('status-badge sb-invalid', iconErr, 'Missing <b>xs</b> cookie — session token not found');
+        return;
+    }
+
+    // Check expiry dates
+    const now = Date.now() / 1000;
+    const expiredKeys = arr.filter(c => c.expirationDate && c.expirationDate > 0 && c.expirationDate < now).map(c => c.key);
+    const criticalExpired = expiredKeys.filter(k => ['c_user','xs','datr','fr'].includes(k));
+
+    if (criticalExpired.length > 0) {
+        ta.classList.add('state-expired');
+        showBadge('status-badge sb-expired', iconWarn,
+            'Cookie is <b>Expired</b> — ' + criticalExpired.join(', ') + ' expired. Re-export from browser.');
+        return;
+    }
+
+    // Check if ALL cookies have no expiry (might still be expired but can't tell client-side)
+    const hasAnyExpiry = arr.some(c => c.expirationDate && c.expirationDate > 0);
+
+    ta.classList.add('state-valid');
+    validCookieStr = val;
+    btn.disabled = false;
+    const uid = cUser.value;
+    const msg = '<b>Valid</b> &nbsp;·&nbsp; ' + arr.length + ' cookies &nbsp;·&nbsp; c_user: <b>' + uid + '</b>'
+              + (xs ? ' &nbsp;·&nbsp; xs ✓' : '')
+              + (!hasAnyExpiry ? ' &nbsp;·&nbsp; <span style="color:#fbbf24">no expiry data</span>' : '');
+    showBadge('status-badge sb-valid', iconOk, msg);
+}
+
+ta.addEventListener('input', function(){
+    clearTimeout(checkTimer);
+    checkTimer = setTimeout(() => checkCookie(this.value), 320);
+});
+
+async function pasteClip() {
+    try {
+        const text = await navigator.clipboard.readText();
+        ta.value = text;
+        checkCookie(text);
+    } catch(_) {
+        ta.focus();
+        document.execCommand('paste');
+    }
+}
+
+async function connectBot() {
+    if (!validCookieStr) return;
+    btn.disabled = true;
+    btn.innerHTML = '<div class="spinner"></div> Connecting…';
+    try {
+        const body = 'fbstate=' + encodeURIComponent(validCookieStr);
+        const res  = await fetch('/api/fbstate/connect', { method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body });
+        const data = await res.json();
+        if (data.ok) {
+            btn.innerHTML = iconOk + ' Connected!';
+            btn.style.background = 'linear-gradient(135deg,#059669,#10b981)';
+            setTimeout(() => location.href = '/?tab=dashboard', 800);
+        } else {
+            btn.disabled = false;
+            btn.innerHTML = 'Connect Bot';
+            showBadge('status-badge sb-invalid', iconErr, data.error || 'Save failed');
+        }
+    } catch(e) {
+        btn.disabled = false;
+        btn.innerHTML = 'Connect Bot';
+        showBadge('status-badge sb-invalid', iconErr, 'Network error: ' + e.message);
+    }
+}
+</script>
+</body>
+</html>`;
+}
+
 function startDashboard(port=5000) {
     const server = http.createServer(async(req,res)=>{
         const url   = new URL(req.url, "http://localhost");
         const path2 = url.pathname;
-        const tab   = url.searchParams.get("tab") || "dashboard";
+        const tabParam = url.searchParams.get("tab");
+        const tab   = tabParam || "dashboard";
 
         function redirect(t){ res.writeHead(302,{Location:t?`/?tab=${t}`:"/"});res.end(); }
-        function htmlErr(msg){ res.writeHead(200,{"Content-Type":"text/html"});res.end(`<!DOCTYPE html><html><body style="background:#0d0d0d;color:#f87171;font-family:monospace;padding:40px"><h3>❌ ${msg}</h3><br><a href="/" style="color:#60a5fa">← Go back</a></body></html>`); }
+        function htmlErr(msg){ res.writeHead(200,{"Content-Type":"text/html"});res.end(`<!DOCTYPE html><html><body style="background:#060c17;color:#fb7185;font-family:monospace;padding:40px"><h3>❌ ${msg}</h3><br><a href="/" style="color:#60a5fa">← Go back</a></body></html>`); }
+        function json(data,code=200){ res.writeHead(code,{"Content-Type":"application/json"});res.end(JSON.stringify(data)); }
 
         try {
             if (path2==="/api/replies/add" && req.method==="POST") {
@@ -1047,6 +1327,28 @@ function startDashboard(port=5000) {
                 writeBotConfig(cfg);
                 redirect(tab); return;
             }
+            // ── /api/fbstate/connect — JSON endpoint for intro page
+            if (path2==="/api/fbstate/connect" && req.method==="POST") {
+                const raw = await readRawBody(req);
+                const eqIdx = raw.indexOf("fbstate=");
+                let jsonStr = "";
+                if (eqIdx !== -1) jsonStr = decodeURIComponent(raw.slice(eqIdx+8).replace(/\+/g," "));
+                jsonStr = jsonStr.trim();
+                if(!jsonStr){ json({ok:false,error:"No data received."}); return; }
+                let parsed;
+                try{ parsed=JSON.parse(jsonStr); }catch(e){ json({ok:false,error:"Invalid JSON: "+e.message}); return; }
+                if(!Array.isArray(parsed)){ json({ok:false,error:"Must be a JSON array"}); return; }
+                if(!parsed.some(c=>c.key==="c_user")){ json({ok:false,error:"Missing c_user cookie — not a valid fbstate"}); return; }
+                if(!parsed.some(c=>c.key==="xs")){ json({ok:false,error:"Missing xs cookie — session token not found"}); return; }
+                // Check expiry server-side too
+                const now=Date.now()/1000;
+                const expired=parsed.filter(c=>c.expirationDate&&c.expirationDate>0&&c.expirationDate<now&&["c_user","xs","datr"].includes(c.key));
+                if(expired.length>0){ json({ok:false,error:"Cookie is expired ("+expired.map(c=>c.key).join(", ")+") — re-export from browser"}); return; }
+                fs.writeFileSync(FBSTATE_FILE,JSON.stringify(parsed,null,2),"utf8");
+                addLog("info","✅ Cookie updated via intro — bot reconnecting…");
+                json({ok:true}); return;
+            }
+            // ── /api/fbstate/update — form POST from Cookie tab (legacy)
             if (path2==="/api/fbstate/update" && req.method==="POST") {
                 const raw = await readRawBody(req);
                 const eqIdx = raw.indexOf("fbstate=");
@@ -1065,6 +1367,13 @@ function startDashboard(port=5000) {
             if (path2==="/api/state" && req.method==="GET") {
                 res.writeHead(200,{"Content-Type":"application/json"});
                 res.end(JSON.stringify({logs,state})); return;
+            }
+            // ── Show intro page at / (no tab param)
+            if (!tabParam && path2==="/") {
+                let html;
+                try{ html=buildIntro(); }catch(e){ html=`<pre style="color:red">${e.stack}</pre>`; }
+                res.writeHead(200,{"Content-Type":"text/html"});
+                res.end(html); return;
             }
             let html;
             try{ html=buildHTML(tab); }
