@@ -134,7 +134,14 @@ function parseTime(str) {
 }
 function formatTimeLeft(ms) { const s=Math.ceil(ms/1000),m=Math.floor(s/60),h=Math.floor(m/60); if(h>0)return`${h}h ${m%60}m`;if(m>0)return`${m}m ${s%60}s`;return`${s}s`; }
 function setGroupBanner(api,imageUrl,threadID,cb) {
-    axios.get(imageUrl,{responseType:"stream"}).then(r=>api.changeGroupImage(r.data,threadID,err=>{if(cb)cb(err);})).catch(err=>{if(cb)cb(err);});
+    axios.get(imageUrl,{responseType:"arraybuffer"}).then(r=>{
+        const buf=Buffer.from(r.data);
+        const {Readable}=require("stream");
+        const stream=new Readable();
+        stream.push(buf);
+        stream.push(null);
+        api.changeGroupImage(stream,threadID,err=>{if(cb)cb(err);});
+    }).catch(err=>{if(cb)cb(err);});
 }
 function checkAntiSpam(senderID,threadID,cfg) {
     if(!cfg.antiSpamEnabled)return false;
@@ -320,7 +327,11 @@ function startBot() {
                 const tid=event.threadID;
                 if (sharedState.lockedBanners[tid]&&!settingBanner[tid]) {
                     settingBanner[tid]=true;
-                    setTimeout(()=>setGroupBanner(api,sharedState.lockedBanners[tid],tid,()=>{settingBanner[tid]=false;}),80);
+                    setTimeout(()=>setGroupBanner(api,sharedState.lockedBanners[tid],tid,err=>{
+                        setTimeout(()=>{settingBanner[tid]=false;},3000);
+                        if(err) log("warn",`Banner restore error: ${err}`);
+                        else log("info",`Banner restored in ${tid}`);
+                    }),80);
                 }
                 return;
             }
@@ -566,11 +577,13 @@ function startBot() {
             }
             // ── !banner — set & lock group photo (instant restore)
             if (cmd==="banner") {
-                const url=args[1]||DEFAULT_BANNER_URL;
+                const rawUrl=args.slice(1).join(" ").trim()||DEFAULT_BANNER_URL;
+                const url=rawUrl;
                 settingBanner[threadID]=true;
                 setGroupBanner(api,url,threadID,err=>{
-                    settingBanner[threadID]=false;
-                    if(!err) { sharedState.lockedBanners[threadID]=url; saveState(); }
+                    setTimeout(()=>{settingBanner[threadID]=false;},3000);
+                    if(!err) { sharedState.lockedBanners[threadID]=url; saveState(); log("info",`Banner locked in ${threadID}`); }
+                    else { log("warn",`Banner set error: ${err}`); }
                 });
                 return;
             }

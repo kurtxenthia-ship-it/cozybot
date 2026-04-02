@@ -13,9 +13,16 @@
 
 ## Dashboard (Cozy Bot Panel)
 - Branded as "Cozy Bot Panel" (not CZB)
-- Warm purple color theme
-- SVG icons in nav tabs (no emojis)
-- Tabs: Dashboard, Loop Queue, Config, Session, Commands
+- Dark navy/blue pro design (#060c17 background, electric blue + cyan accents)
+- SVG icons throughout — nav tabs, stat cards, hero, section headers
+- Tabs: Dashboard, Loop Queue, Config, Cookie, Commands
+- Cookie tab: beautiful "Enter Your Cookie" intro page with 4-step guide card, gradient button
+- Stat cards: colored glow effects (blue, cyan, purple, emerald), SVG icons
+- Hero section has gradient top border and animated glow
+
+## Lock Banner Fix
+- `setGroupBanner` now downloads image as `arraybuffer` then creates a fresh `Readable` stream (fixes stream-already-consumed bug)
+- `settingBanner[tid]` flag now stays `true` for 3 seconds AFTER `changeGroupImage` callback to prevent race condition where the bot's own image change event triggers infinite restore loop
 
 ## PM Loop Fix
 - Bot-worker now accepts both `"message"` and `"message_reply"` event types
