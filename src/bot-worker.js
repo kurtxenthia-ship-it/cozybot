@@ -277,8 +277,13 @@ function startBot() {
         api.setOptions({ userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36" });
         reconnectDelay = MIN_RECONNECT;
         const BOT_SELF_ID = api.getCurrentUserID();
-        send("status",{loggedIn:true,reconnecting:false,expired:false,nextReconnectIn:0});
-        log("info",`Logged in! Bot ready. botID=${BOT_SELF_ID}`);
+        api.getUserInfo([BOT_SELF_ID], (err2, ret) => {
+            const name = (!err2 && ret && ret[BOT_SELF_ID])
+                ? (ret[BOT_SELF_ID].name || ret[BOT_SELF_ID].fullName || BOT_SELF_ID)
+                : BOT_SELF_ID;
+            send("status",{loggedIn:true,reconnecting:false,expired:false,nextReconnectIn:0,botName:name});
+            log("info",`Logged in! Bot ready. botID=${BOT_SELF_ID} name=${name}`);
+        });
 
         const keepalive = setInterval(()=>{ try{api.getThreadList(1,null,[],()=>{});}catch(_){} }, 55000);
         if (lockedProfilePic) startProfileGuard(api);

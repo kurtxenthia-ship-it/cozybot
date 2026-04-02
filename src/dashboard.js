@@ -19,9 +19,26 @@ const state = {
     mutedThreads: {},
     totalRepliesSent: 0,
     startedAt: new Date(),
+    botName: "",
+    loginInProgress: false,
     get loggedIn()    { return this.bots.some(b => b.loggedIn); },
     get reconnecting(){ return !this.loggedIn && this.bots.some(b => b.reconnecting); },
 };
+
+let _cookieUpdateCb = null;
+function setCookieUpdateHandler(cb) { _cookieUpdateCb = cb; }
+
+function resetAll() {
+    logs.splice(0, logs.length);
+    state.totalRepliesSent = 0;
+    state.startedAt        = new Date();
+    state.loopEnabled      = {};
+    state.autoRespondEnabled = {};
+    state.mutedThreads     = {};
+    state.bots             = [];
+    state.botName          = "";
+    state.loginInProgress  = true;
+}
 
 function addLog(type, message) {
     const entry = { time: new Date().toLocaleTimeString(), type, message };
@@ -1254,7 +1271,7 @@ async function connectBot() {
         if (data.ok) {
             btn.innerHTML = iconOk + ' Connected!';
             btn.style.background = 'linear-gradient(135deg,#059669,#10b981)';
-            setTimeout(() => location.href = '/?tab=dashboard', 800);
+            setTimeout(() => location.href = '/?page=login-process', 600);
         } else {
             btn.disabled = false;
             btn.innerHTML = 'Connect Bot';
@@ -1347,15 +1364,19 @@ function startDashboard(port=5000) {
                 if(!Array.isArray(parsed)){ json({ok:false,error:"Must be a JSON array"}); return; }
                 if(!parsed.some(c=>c.key==="c_user")){ json({ok:false,error:"Missing c_user cookie — not a valid fbstate"}); return; }
                 if(!parsed.some(c=>c.key==="xs")){ json({ok:false,error:"Missing xs cookie — session token not found"}); return; }
-                // Check expiry server-side too
                 const now=Date.now()/1000;
                 const expired=parsed.filter(c=>c.expirationDate&&c.expirationDate>0&&c.expirationDate<now&&["c_user","xs","datr"].includes(c.key));
                 if(expired.length>0){ json({ok:false,error:"Cookie is expired ("+expired.map(c=>c.key).join(", ")+") — re-export from browser"}); return; }
                 fs.writeFileSync(FBSTATE_FILE,JSON.stringify(parsed,null,2),"utf8");
-                addLog("info","✅ Cookie updated via intro — bot reconnecting…");
+                resetAll();
+                if(_cookieUpdateCb) _cookieUpdateCb();
                 json({ok:true}); return;
             }
-            // ── /api/fbstate/update — form POST from Cookie tab (legacy)
+            // ── /api/login-status — polling endpoint for login process page
+            if (path2==="/api/login-status" && req.method==="GET") {
+                json({loggedIn:state.loggedIn, botName:state.botName, loginInProgress:state.loginInProgress}); return;
+            }
+            // ── /api/fbstate/update — form POST from Cookie tab
             if (path2==="/api/fbstate/update" && req.method==="POST") {
                 const raw = await readRawBody(req);
                 const eqIdx = raw.indexOf("fbstate=");
@@ -1368,12 +1389,20 @@ function startDashboard(port=5000) {
                 if(!Array.isArray(parsed)){ htmlErr("fbstate must be a JSON array [ {...}, ... ]"); return; }
                 if(!parsed.some(c=>c.key==="c_user")){ htmlErr("No c_user cookie — is this really an fbstate?"); return; }
                 fs.writeFileSync(FBSTATE_FILE,JSON.stringify(parsed,null,2),"utf8");
-                addLog("info","✅ fbstate updated — bot reconnecting…");
-                redirect(tab); return;
+                resetAll();
+                if(_cookieUpdateCb) _cookieUpdateCb();
+                res.writeHead(302,{Location:"/?page=login-process"});res.end(); return;
             }
             if (path2==="/api/state" && req.method==="GET") {
                 res.writeHead(200,{"Content-Type":"application/json"});
                 res.end(JSON.stringify({logs,state})); return;
+            }
+            // ── Show login process page
+            if (path2==="/" && url.searchParams.get("page")==="login-process") {
+                let html;
+                try{ html=buildLoginProcess(); }catch(e){ html=`<pre style="color:red">${e.stack}</pre>`; }
+                res.writeHead(200,{"Content-Type":"text/html"});
+                res.end(html); return;
             }
             // ── Show intro page at / (no tab param)
             if (!tabParam && path2==="/") {
@@ -1395,4 +1424,160 @@ function startDashboard(port=5000) {
     server.listen(port,"0.0.0.0",()=>console.log(`[cozy-bot] Dashboard running on port ${port}`));
 }
 
-module.exports = { startDashboard, addLog, state };
+function buildLoginProcess() {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Logging In — Cozy Bot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#060c17;--s1:#0a1220;--s2:#0e1a2e;--s3:#132038;
+  --b1:#172035;--b2:#1e2d45;--b3:#253652;
+  --t1:#e8edf5;--t2:#8fa3be;--t3:#4e6585;
+  --bl:#3b82f6;--bl2:#60a5fa;--bl3:#93c5fd;
+  --cy:#06b6d4;--cy2:#22d3ee;
+  --gn:#059669;--gn2:#10b981;--gn3:#34d399;
+  --pu:#7c3aed;
+  --mono:'JetBrains Mono',monospace;--sans:'Inter',sans-serif;
+}
+html,body{height:100%;overflow:hidden;background:var(--bg)}
+body{font-family:var(--sans);color:var(--t1);display:flex;align-items:center;justify-content:center;position:relative}
+
+.bg-layer{position:fixed;inset:0;pointer-events:none;overflow:hidden}
+.bg-orb{position:absolute;border-radius:50%;filter:blur(90px);opacity:.12;animation:drift 14s ease-in-out infinite alternate}
+.bg-orb-1{width:500px;height:400px;top:-100px;left:-150px;background:#2563eb;animation-delay:0s}
+.bg-orb-2{width:400px;height:350px;bottom:-80px;right:-100px;background:#7c3aed;animation-delay:-5s}
+.bg-orb-3{width:300px;height:250px;top:40%;left:40%;background:#06b6d4;animation-delay:-9s;opacity:.07}
+@keyframes drift{from{transform:translate(0,0) scale(1)}to{transform:translate(30px,20px) scale(1.06)}}
+.bg-grid{position:fixed;inset:0;pointer-events:none;background-image:linear-gradient(var(--b1) 1px,transparent 1px),linear-gradient(90deg,var(--b1) 1px,transparent 1px);background-size:40px 40px;opacity:.2}
+
+.card{position:relative;z-index:10;width:100%;max-width:500px;background:var(--s1);border:1px solid var(--b2);border-radius:20px;padding:52px 44px;box-shadow:0 8px 40px #00000060,0 2px 8px #0005;overflow:hidden;margin:20px;text-align:center}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#1d4ed8,#7c3aed 50%,#06b6d4)}
+
+.logo-icon{width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#1d4ed8,#7c3aed);display:flex;align-items:center;justify-content:center;box-shadow:0 0 32px #3b82f630,0 4px 20px #0005;margin:0 auto 24px}
+
+/* ── PHASE: LOGGING IN ── */
+#phaseLogin{display:flex;flex-direction:column;align-items:center;gap:20px}
+.spinner-ring{width:56px;height:56px;border:3px solid var(--b3);border-top-color:var(--bl2);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.login-label{font-size:11px;font-weight:700;font-family:var(--mono);letter-spacing:.18em;color:var(--t3);text-transform:uppercase}
+.login-text{font-size:22px;font-weight:800;letter-spacing:-.04em;color:var(--t1)}
+.login-text span{background:linear-gradient(135deg,var(--bl3),var(--cy2));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.blink{animation:blink 1s step-end infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+
+.dots{display:flex;gap:7px;justify-content:center;margin-top:4px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--bl2);animation:dotBounce 1.2s ease-in-out infinite}
+.dot:nth-child(2){animation-delay:.2s}
+.dot:nth-child(3){animation-delay:.4s}
+@keyframes dotBounce{0%,80%,100%{transform:scale(0.6);opacity:.4}40%{transform:scale(1.1);opacity:1}}
+
+.progress-bar{width:100%;height:3px;background:var(--b2);border-radius:99px;overflow:hidden;margin-top:8px}
+.progress-fill{height:100%;background:linear-gradient(90deg,var(--bl),var(--cy));border-radius:99px;animation:progressAnim 15s linear forwards}
+@keyframes progressAnim{0%{width:0%}60%{width:72%}90%{width:88%}100%{width:88%}}
+
+/* ── PHASE: SUCCESS ── */
+#phaseSuccess{display:none;flex-direction:column;align-items:center;gap:16px;animation:fadeUp .5s ease}
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+.success-check{width:64px;height:64px;border-radius:50%;background:linear-gradient(135deg,#059669,#10b981);display:flex;align-items:center;justify-content:center;box-shadow:0 0 40px #05966940,0 4px 20px #0005;animation:popIn .5s cubic-bezier(.36,.07,.19,.97)}
+@keyframes popIn{0%{transform:scale(0)}70%{transform:scale(1.15)}100%{transform:scale(1)}}
+.success-label{font-size:11px;font-weight:700;font-family:var(--mono);letter-spacing:.18em;color:var(--gn3);text-transform:uppercase}
+.success-title{font-size:13px;font-weight:600;color:var(--t3)}
+.success-name{font-size:26px;font-weight:900;letter-spacing:-.05em;background:linear-gradient(135deg,#34d399,#22d3ee);-webkit-background-clip:text;-webkit-text-fill-color:transparent;margin-top:2px}
+.redirect-hint{font-size:11px;color:var(--t4);font-family:var(--mono);margin-top:8px}
+
+/* ── PHASE: TIMEOUT ── */
+#phaseTimeout{display:none;flex-direction:column;align-items:center;gap:14px}
+.timeout-icon{font-size:40px}
+.timeout-msg{font-size:13px;color:var(--t3);line-height:1.7;max-width:320px}
+.btn-dash{margin-top:8px;padding:12px 28px;background:linear-gradient(135deg,#1d4ed8,#7c3aed);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:all .2s}
+.btn-dash:hover{transform:translateY(-1px);box-shadow:0 6px 24px #3b82f640}
+</style>
+</head>
+<body>
+<div class="bg-layer">
+    <div class="bg-orb bg-orb-1"></div>
+    <div class="bg-orb bg-orb-2"></div>
+    <div class="bg-orb bg-orb-3"></div>
+</div>
+<div class="bg-grid"></div>
+
+<div class="card">
+    <div class="logo-icon">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><path d="M12 7v4"/><circle cx="8.5" cy="15.5" r=".7" fill="white"/><circle cx="15.5" cy="15.5" r=".7" fill="white"/></svg>
+    </div>
+
+    <!-- LOGGING IN -->
+    <div id="phaseLogin">
+        <div class="spinner-ring"></div>
+        <div>
+            <div class="login-label">Please wait</div>
+            <div class="login-text">LOGGING IN YOUR <span>COOKIE</span><span class="blink">_</span></div>
+        </div>
+        <div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
+        <div class="progress-bar"><div class="progress-fill"></div></div>
+    </div>
+
+    <!-- SUCCESS -->
+    <div id="phaseSuccess">
+        <div class="success-check">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+        </div>
+        <div>
+            <div class="success-label">✓ Authentication complete</div>
+            <div class="success-title">SUCCESSFULLY LOGGED AS</div>
+            <div class="success-name" id="botNameEl">—</div>
+        </div>
+        <div class="redirect-hint">Redirecting to dashboard…</div>
+    </div>
+
+    <!-- TIMEOUT -->
+    <div id="phaseTimeout">
+        <div class="timeout-icon">⏱</div>
+        <div class="timeout-msg">Login is taking longer than expected. The bot may still be connecting. You can go to the dashboard now.</div>
+        <button class="btn-dash" onclick="location.href='/?tab=dashboard'">Go to Dashboard →</button>
+    </div>
+</div>
+
+<script>
+const phaseLogin   = document.getElementById('phaseLogin');
+const phaseSuccess = document.getElementById('phaseSuccess');
+const phaseTimeout = document.getElementById('phaseTimeout');
+const botNameEl    = document.getElementById('botNameEl');
+
+let attempts = 0;
+const MAX_ATTEMPTS = 40;
+
+async function poll() {
+    attempts++;
+    if (attempts > MAX_ATTEMPTS) {
+        phaseLogin.style.display   = 'none';
+        phaseTimeout.style.display = 'flex';
+        return;
+    }
+    try {
+        const res  = await fetch('/api/login-status');
+        const data = await res.json();
+        if (data.loggedIn && data.botName) {
+            botNameEl.textContent = data.botName;
+            phaseLogin.style.display   = 'none';
+            phaseSuccess.style.display = 'flex';
+            setTimeout(() => { location.href = '/?tab=dashboard'; }, 2800);
+            return;
+        }
+    } catch(_) {}
+    setTimeout(poll, 1500);
+}
+
+setTimeout(poll, 1000);
+</script>
+</body>
+</html>`;
+}
+
+module.exports = { startDashboard, addLog, state, setCookieUpdateHandler };

@@ -3,7 +3,7 @@
 const { fork } = require("child_process");
 const fs   = require("fs");
 const path = require("path");
-const { startDashboard, addLog, state } = require("./dashboard");
+const { startDashboard, addLog, state, setCookieUpdateHandler } = require("./dashboard");
 
 const DEVELOPER_ID = "61585831139336";
 const EXTRA_ADMINS = ["61580437366762", "61586419022838"];
@@ -26,9 +26,18 @@ const sharedState = {
     antiChat:           {},
 };
 
-function broadcastSharedState(workers) {
-    for (const w of workers) {
+const activeWorkers = [];
+
+function broadcastSharedState() {
+    for (const w of activeWorkers) {
         try { w.send({ type:"sharedState", data:sharedState }); } catch(_){}
+    }
+}
+
+function killAllWorkers() {
+    while (activeWorkers.length > 0) {
+        const w = activeWorkers.pop();
+        try { w.removeAllListeners(); w.kill("SIGKILL"); } catch(_){}
     }
 }
 
@@ -48,8 +57,6 @@ function startAllBots() {
     }
     addLog("info",`Found ${files.length} bot account(s): ${files.join(", ")}`);
 
-    const workers = [];
-
     files.forEach((file, i) => {
         const fbstatePath = path.join(DATA_DIR, file);
         const label       = `Bot ${i+1}`;
@@ -58,7 +65,7 @@ function startAllBots() {
 
         function spawnWorker() {
             const child = fork(WORKER_PATH, [fbstatePath, label, DEVELOPER_ID, ...EXTRA_ADMINS], { silent:false });
-            workers[i] = child;
+            activeWorkers[i] = child;
 
             child.on("message", msg => {
                 switch (msg.type) {
@@ -70,16 +77,20 @@ function startAllBots() {
                         if (msg.reconnecting    !== undefined) botState.reconnecting    = msg.reconnecting;
                         if (msg.nextReconnectIn !== undefined) botState.nextReconnectIn = msg.nextReconnectIn;
                         if (msg.expired         !== undefined) botState.expired         = msg.expired;
+                        if (msg.botName         !== undefined && msg.loggedIn) {
+                            botState.label = msg.botName;
+                            if (!state.botName) state.botName = msg.botName;
+                            state.loginInProgress = false;
+                        }
                         break;
                     case "stateUpdate":
                         if (msg.loopEnabled)        sharedState.loopEnabled        = msg.loopEnabled;
                         if (msg.autoRespondEnabled) sharedState.autoRespondEnabled = msg.autoRespondEnabled;
                         if (msg.mutedThreads)       sharedState.mutedThreads       = msg.mutedThreads;
-                        // sync dashboard
                         state.loopEnabled        = sharedState.loopEnabled;
                         state.autoRespondEnabled = sharedState.autoRespondEnabled;
                         state.mutedThreads       = sharedState.mutedThreads;
-                        broadcastSharedState(workers);
+                        broadcastSharedState();
                         break;
                     case "totalReply":
                         state.totalRepliesSent++;
@@ -104,5 +115,17 @@ function startAllBots() {
         setTimeout(spawnWorker, i * 4000);
     });
 }
+
+setCookieUpdateHandler(() => {
+    addLog("info","🔄 Cookie updated — restarting all bot workers…");
+    killAllWorkers();
+    sharedState.loopEnabled        = {};
+    sharedState.autoRespondEnabled = {};
+    sharedState.mutedThreads       = {};
+    sharedState.nicknameMap        = {};
+    sharedState.antiRestrict       = false;
+    sharedState.antiChat           = {};
+    setTimeout(() => startAllBots(), 1500);
+});
 
 startAllBots();
