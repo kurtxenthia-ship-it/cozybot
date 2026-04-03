@@ -3,7 +3,7 @@
 const { fork } = require("child_process");
 const fs   = require("fs");
 const path = require("path");
-const { startDashboard, addLog, state, setCookieUpdateHandler, setLoopControlHandler, trackMessage, addAlert } = require("./dashboard");
+const { startDashboard, addLog, state, setCookieUpdateHandler, setLoopControlHandler, trackMessage, addAlert, shutdown } = require("./dashboard");
 
 const DEVELOPER_ID = "61585831139336";
 const EXTRA_ADMINS = ["61580437366762", "61586419022838"];
@@ -134,9 +134,9 @@ setLoopControlHandler((action, threadID) => {
 setCookieUpdateHandler(() => {
     addLog("info","🔄 Cookie updated — performing full restart (web + bots)…");
     killAllWorkers();
-    setTimeout(() => {
+    shutdown(() => {
         process.exit(0);
-    }, 800);
+    });
 });
 
 startAllBots();

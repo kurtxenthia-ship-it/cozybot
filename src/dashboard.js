@@ -1758,6 +1758,18 @@ function startDashboard(port=5000) {
     });
     server.on("error",err=>console.error("[cozy-bot] Dashboard error:",err));
     server.listen(port,"0.0.0.0",()=>console.log(`[cozy-bot] Dashboard running on port ${port}`));
+    _httpServer = server;
+}
+
+let _httpServer = null;
+function shutdown(cb) {
+    if (_httpServer) {
+        _httpServer.close(() => { if(cb) cb(); });
+        // Force-close any lingering keep-alive connections
+        setTimeout(() => { if(cb) cb(); }, 1500);
+    } else {
+        if(cb) cb();
+    }
 }
 
 function buildLoginProcess() {
@@ -1916,4 +1928,4 @@ setTimeout(poll, 1000);
 </html>`;
 }
 
-module.exports = { startDashboard, addLog, state, setCookieUpdateHandler, setLoopControlHandler, trackMessage, addAlert };
+module.exports = { startDashboard, addLog, state, setCookieUpdateHandler, setLoopControlHandler, trackMessage, addAlert, shutdown };
