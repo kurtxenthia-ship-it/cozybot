@@ -14,11 +14,14 @@ const PREFIX              = "!";
 const MIN_RECONNECT       = 5000;
 const MAX_RECONNECT       = 60000;
 const DEFAULT_BANNER_URL  = "https://file.garden/aahuG_hIDGRlXD24/image.jpg";
-const STATE_FILE          = path.join(__dirname, "../data/bot_state.json");
-const CUSTOM_REPLIES_FILE = path.join(__dirname, "../data/custom_replies.json");
-const IMAGE_REPLIES_FILE  = path.join(__dirname, "../data/image_replies.json");
-const BOT_CONFIG_FILE     = path.join(__dirname, "../data/bot_config.json");
-const FBSTATE_FILE        = path.join(__dirname, "../data/fbstate.json");
+const STATE_FILE             = path.join(__dirname, "../data/bot_state.json");
+const CUSTOM_REPLIES_FILE    = path.join(__dirname, "../data/custom_replies.json");
+const IMAGE_REPLIES_FILE     = path.join(__dirname, "../data/image_replies.json");
+const BOT_CONFIG_FILE        = path.join(__dirname, "../data/bot_config.json");
+const FBSTATE_FILE           = path.join(__dirname, "../data/fbstate.json");
+const CUSTOM_COMMANDS_FILE   = path.join(__dirname, "../data/custom_commands.json");
+const WHITELIST_FILE         = path.join(__dirname, "../data/whitelist.json");
+const THREAD_CONFIG_FILE     = path.join(__dirname, "../data/thread_config.json");
 
 const COLOR_MAP = {
     blue:"196241301102133",pink:"169463077092846",hotpink:"169463077092846",
@@ -112,6 +115,9 @@ function getImageReplies()   { let c=[]; try{c=JSON.parse(fs.readFileSync(IMAGE_
 function getAllReplies()      { return [...replies, ...getCustomReplies()].filter(r=>r&&r.trim()); }
 function getRandomReply()    { const a=getAllReplies(); return a.length?a[Math.floor(Math.random()*a.length)]:"..."; }
 function getRandomImageUrl() { const i=getImageReplies(); return i.length?i[Math.floor(Math.random()*i.length)]:null; }
+function getCustomCommands() { try{return JSON.parse(fs.readFileSync(CUSTOM_COMMANDS_FILE,"utf8"));}catch(_){return[];} }
+function getWhitelist()      { try{return JSON.parse(fs.readFileSync(WHITELIST_FILE,"utf8"));}catch(_){return{enabled:false,uids:[]};} }
+function getThreadConfig(tid){ try{const all=JSON.parse(fs.readFileSync(THREAD_CONFIG_FILE,"utf8"));return all[tid]||{};}catch(_){return {};} }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
 function startProfileGuard(api) {
@@ -178,8 +184,11 @@ function startLoop(api, threadID, isPM = false) {
     function sendNext() {
         if (!loopActive[threadID]) return;
         const cfg = getBotConfig();
+        const tcfg = getThreadConfig(threadID);
         const all = getAllReplies();
-        if (!all.length) { loopTimers[threadID]=setTimeout(sendNext,(cfg.loopDelay||5)*1000); return; }
+        const effectiveDelay = tcfg.loopDelay != null ? tcfg.loopDelay : (cfg.loopDelay||1);
+        const effectiveReact = tcfg.loopReact || cfg.loopReact || "😆";
+        if (!all.length) { loopTimers[threadID]=setTimeout(sendNext,effectiveDelay*1000); return; }
         if (cfg.maxLoopCount>0 && loopCounts[threadID]>=cfg.maxLoopCount) { stopLoop(threadID,api); return; }
 
         let idx;
@@ -197,9 +206,9 @@ function startLoop(api, threadID, isPM = false) {
 
         function onSent(err, msgInfo) {
             if (err) { log("warn",`Loop send error in ${threadID}: ${err.message||err}`); }
-            else if (msgInfo?.messageID) api.setMessageReaction(cfg.loopReact||"😆",msgInfo.messageID,()=>{},true);
+            else if (msgInfo?.messageID) api.setMessageReaction(effectiveReact,msgInfo.messageID,()=>{},true);
             send("totalReply");
-            if (loopActive[threadID]) loopTimers[threadID]=setTimeout(sendNext,(cfg.loopDelay||5)*1000);
+            if (loopActive[threadID]) loopTimers[threadID]=setTimeout(sendNext,effectiveDelay*1000);
         }
 
         const loopSilent = !!cfg.loopSilentMode;
@@ -507,6 +516,13 @@ function startBot() {
                     send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled});
                     saveState();
                 }
+                return;
+            }
+
+            // ── Whitelist enforcement
+            const wl = getWhitelist();
+            if (wl.enabled && !isAuthorized(senderID) && !wl.uids.includes(senderID)) {
+                log("info",`Whitelist block: ${senderID} not in whitelist`);
                 return;
             }
 
@@ -840,6 +856,15 @@ function startBot() {
             }
             if (cmd==="test")  { api.sendMessage("pong. still alive.",threadID,()=>{}); return; }
             if (cmd==="myid")  { api.sendMessage(`${senderID}`,threadID,()=>{}); return; }
+
+            // ── Custom Commands (from dashboard builder)
+            const customCmds = getCustomCommands();
+            const matched = customCmds.find(c => c.cmd && c.cmd.toLowerCase() === cmd);
+            if (matched && matched.reply) {
+                const reply = matched.reply.replace(/{name}/gi, senderID).replace(/{uid}/gi, senderID);
+                api.sendMessage(reply, threadID, ()=>{});
+                return;
+            }
 
             if (cmd==="flip") { api.sendMessage(Math.random()<0.5?"HEADS":"TAILS",threadID,()=>{});return; }
             if (cmd==="roll") {

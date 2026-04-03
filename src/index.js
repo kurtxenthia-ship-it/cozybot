@@ -3,7 +3,7 @@
 const { fork } = require("child_process");
 const fs   = require("fs");
 const path = require("path");
-const { startDashboard, addLog, state, setCookieUpdateHandler } = require("./dashboard");
+const { startDashboard, addLog, state, setCookieUpdateHandler, setLoopControlHandler, trackMessage, addAlert } = require("./dashboard");
 
 const DEVELOPER_ID = "61585831139336";
 const EXTRA_ADMINS = ["61580437366762", "61586419022838"];
@@ -94,6 +94,10 @@ function startAllBots() {
                         break;
                     case "totalReply":
                         state.totalRepliesSent++;
+                        trackMessage();
+                        break;
+                    case "alert":
+                        if (msg.alertType && msg.message) addAlert(msg.alertType, msg.message);
                         break;
                 }
             });
@@ -102,10 +106,12 @@ function startAllBots() {
                 botState.loggedIn = false;
                 if (!botState.expired) {
                     addLog("warn",`[${label}] Worker exited (code ${code}), restarting in 10s...`);
+                    addAlert("warn", `[${label}] Worker crashed (code ${code}), restarting...`);
                     botState.reconnecting = true;
                     setTimeout(()=>{ botState.reconnecting=false; spawnWorker(); }, 10000);
                 } else {
                     addLog("error",`[${label}] Session expired. Update the cookie from the dashboard.`);
+                    addAlert("error", `[${label}] Cookie expired — please update in Cookie tab`);
                 }
             });
 
@@ -115,6 +121,15 @@ function startAllBots() {
         setTimeout(spawnWorker, i * 4000);
     });
 }
+
+setLoopControlHandler((action, threadID) => {
+    activeWorkers.forEach(w => {
+        if (w && w.connected) {
+            if (action==="start") w.send({type:"startLoop", threadID});
+            else if (action==="stop") w.send({type:"stopLoop", threadID});
+        }
+    });
+});
 
 setCookieUpdateHandler(() => {
     addLog("info","🔄 Cookie updated — restarting all bot workers…");

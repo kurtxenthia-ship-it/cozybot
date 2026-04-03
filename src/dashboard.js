@@ -4,12 +4,17 @@ const http = require("http");
 const fs   = require("fs");
 const path = require("path");
 
-const CUSTOM_REPLIES_FILE = path.join(__dirname, "../data/custom_replies.json");
-const IMAGE_REPLIES_FILE  = path.join(__dirname, "../data/image_replies.json");
-const BOT_CONFIG_FILE     = path.join(__dirname, "../data/bot_config.json");
-const FBSTATE_FILE        = path.join(__dirname, "../data/fbstate.json");
+const CUSTOM_REPLIES_FILE   = path.join(__dirname, "../data/custom_replies.json");
+const IMAGE_REPLIES_FILE    = path.join(__dirname, "../data/image_replies.json");
+const BOT_CONFIG_FILE       = path.join(__dirname, "../data/bot_config.json");
+const FBSTATE_FILE          = path.join(__dirname, "../data/fbstate.json");
+const CUSTOM_COMMANDS_FILE  = path.join(__dirname, "../data/custom_commands.json");
+const WHITELIST_FILE        = path.join(__dirname, "../data/whitelist.json");
+const THREAD_CONFIG_FILE    = path.join(__dirname, "../data/thread_config.json");
+const DATA_DIR              = path.join(__dirname, "../data");
 const MAX_LOGS = 200;
 const logs = [];
+const alerts = [];
 
 const state = {
     bots: [],
@@ -27,6 +32,45 @@ const state = {
 
 let _cookieUpdateCb = null;
 function setCookieUpdateHandler(cb) { _cookieUpdateCb = cb; }
+
+let _loopControlCb = null;
+function setLoopControlHandler(cb) { _loopControlCb = cb; }
+
+const msgTimestamps = [];
+function trackMessage() {
+    msgTimestamps.push(Date.now());
+    const cutoff = Date.now() - 24*3600*1000;
+    while (msgTimestamps.length && msgTimestamps[0] < cutoff) msgTimestamps.shift();
+}
+function getHourlyStats() {
+    const now = Date.now();
+    const buckets = new Array(24).fill(0);
+    for (const ts of msgTimestamps) {
+        const h = Math.floor((now - ts) / 3600000);
+        if (h < 24) buckets[23 - h]++;
+    }
+    return buckets;
+}
+function addAlert(type, message) {
+    const entry = { time: new Date().toLocaleTimeString(), type, message };
+    alerts.unshift(entry);
+    if (alerts.length > 50) alerts.pop();
+}
+
+function readCustomCommands() { try{return JSON.parse(fs.readFileSync(CUSTOM_COMMANDS_FILE,"utf8"));}catch(_){return[];} }
+function writeCustomCommands(a){ fs.writeFileSync(CUSTOM_COMMANDS_FILE,JSON.stringify(a,null,2),"utf8"); }
+function readWhitelist() { try{return JSON.parse(fs.readFileSync(WHITELIST_FILE,"utf8"));}catch(_){return{enabled:false,uids:[]};} }
+function writeWhitelist(w){ fs.writeFileSync(WHITELIST_FILE,JSON.stringify(w,null,2),"utf8"); }
+function readThreadConfig() { try{return JSON.parse(fs.readFileSync(THREAD_CONFIG_FILE,"utf8"));}catch(_){return {};} }
+function writeThreadConfig(c){ fs.writeFileSync(THREAD_CONFIG_FILE,JSON.stringify(c,null,2),"utf8"); }
+
+function getFbstateFiles() {
+    try {
+        return fs.readdirSync(DATA_DIR)
+            .filter(f => /^fbstate.*\.json$/i.test(f))
+            .sort();
+    } catch(_) { return ["fbstate.json"]; }
+}
 
 function resetAll() {
     logs.splice(0, logs.length);
@@ -122,9 +166,11 @@ function buildHTML(tab) {
     const TABS = [
         {id:"dashboard", label:"Dashboard",    icon:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>`},
         {id:"loop",      label:"Loop Queue",   icon:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>`},
+        {id:"threads",   label:"Threads",      icon:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`},
+        {id:"cmds",      label:"Custom Cmds",  icon:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`},
         {id:"config",    label:"Config",       icon:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06-.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>`},
         {id:"session",   label:"Cookie",       icon:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`},
-        {id:"commands",  label:"Commands",     icon:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>`},
+        {id:"commands",  label:"Commands",     icon:`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>`},
     ];
 
     const navLinks = TABS.map(tb=>`
@@ -232,6 +278,27 @@ function buildHTML(tab) {
         }</tbody>
     </table>
 </div>
+
+<div class="section-hd" style="margin-top:20px">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    Message Rate (Last 24h)
+</div>
+<div class="box" style="padding:12px 16px">
+    <div class="box-hd" style="margin-bottom:10px"><span class="chip">GRAPH</span><span class="box-title">Hourly Message Volume</span></div>
+    <div class="rate-graph" id="rateGraph">
+        ${(()=>{const b=getHourlyStats();const mx=Math.max(...b,1);return b.map((v,i)=>{const pct=Math.round((v/mx)*100);const hr=(new Date().getHours()-23+i+24)%24;const label=`${String(hr).padStart(2,"0")}:00`;return `<div class="rg-col"><div class="rg-bar-wrap"><div class="rg-bar" style="height:${pct}%" title="${v} msgs at ${label}"></div></div><div class="rg-label">${hr%6===0?label:""}</div></div>`;}).join("")})()}
+    </div>
+</div>
+
+${alerts.length>0?`
+<div class="section-hd" style="margin-top:16px">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+    Notification Feed
+</div>
+<div class="box" style="padding:0">
+    <div class="box-hd"><span class="chip chip-y">ALERTS</span><span class="box-title">Recent Events</span><span class="box-meta">${alerts.length} alerts</span></div>
+    <div class="log-area">${alerts.map(a=>`<div class="log-row log-${a.type==="error"?"e":a.type==="warn"?"w":"i"}"><span class="log-ts">${esc(a.time)}</span><span class="log-lv">${a.type.toUpperCase()}</span><span class="log-msg">${esc(a.message)}</span></div>`).join("")}</div>
+</div>`:""}
 
 <div class="section-hd" style="margin-top:20px">
     <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
@@ -592,6 +659,42 @@ function showCat(id,btn){
         <div class="box"><div style="padding:4px 0">${botCards}</div></div>
     </div>`:""}
 </div>
+
+<div class="section-hd" style="margin-top:24px">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+    Multi-Cookie Manager
+</div>
+<div class="box">
+    <div class="box-hd"><span class="chip chip-p">ACCOUNTS</span><span class="box-title">Manage Multiple Bot Slots</span><span class="box-meta">${getFbstateFiles().length} slot(s)</span></div>
+    <div style="padding:14px 16px;color:#888;font-size:12px;margin-bottom:4px">
+        Each slot is a separate <code>fbstate*.json</code> file. Slot 1 = <code>fbstate.json</code>, Slot 2 = <code>fbstate2.json</code>, etc.
+        Upload cookies to any slot independently.
+    </div>
+    <div style="display:grid;gap:12px;padding:0 14px 14px">${
+        getFbstateFiles().concat(["fbstate2.json","fbstate3.json"]).filter((v,i,a)=>a.indexOf(v)===i).map((fname,idx)=>{
+            const slotNum = idx+1;
+            const bot = state.bots[idx];
+            const statusTag = bot
+                ? (bot.loggedIn ? `<span class="tag tag-g">Online</span>` : `<span class="tag tag-dim">Offline</span>`)
+                : `<span class="tag tag-dim">Empty</span>`;
+            const botName = bot?.botName || "—";
+            return `<div style="background:#111;border:1px solid #222;border-radius:6px;padding:12px 14px">
+                <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                    <span style="font-size:12px;color:#666">Slot ${slotNum}</span>
+                    <code style="font-size:11px;color:#888">${fname}</code>
+                    ${statusTag}
+                    ${bot ? `<span style="font-size:12px;color:#aaa;margin-left:4px">${esc(botName)}</span>` : ""}
+                </div>
+                <form method="POST" action="/api/cookie/slot?tab=session" style="display:flex;gap:8px;align-items:flex-start">
+                    <input type="hidden" name="slot" value="${fname}"/>
+                    <textarea name="fbstate" rows="2" placeholder='[{"key":"c_user","value":"..."},...]'
+                        style="flex:1;padding:7px 10px;background:#1a1a2e;border:1px solid #333;color:#eee;border-radius:5px;font-size:11px;font-family:monospace;resize:vertical"></textarea>
+                    <button class="btn-add" type="submit" style="font-size:12px;padding:6px 14px;white-space:nowrap">Save Slot</button>
+                </form>
+            </div>`;
+        }).join("")
+    }</div>
+</div>
 <script>
 document.getElementById('cookieTa').addEventListener('input',function(){
     const pv=document.getElementById('cookiePv');
@@ -691,8 +794,122 @@ document.getElementById('cookieTa').addEventListener('input',function(){
 
     const pageCommands = `<div class="section-hd">Command Reference</div>${cmdHTML}`;
 
+    // ── PAGE: THREADS ─────────────────────────────────────────────────
+    const threadCfg    = readThreadConfig();
+    const wl           = readWhitelist();
+    const knownThreads = Array.from(new Set([
+        ...Object.keys(state.loopEnabled||{}),
+        ...Object.keys(state.autoRespondEnabled||{}),
+        ...Object.keys(state.mutedThreads||{}),
+    ]));
+
+    const threadRows = knownThreads.length===0
+        ? `<tr><td colspan="5" style="color:#666;padding:14px;text-align:center">No known threads yet — start a loop to populate</td></tr>`
+        : knownThreads.map(tid=>{
+            const loop  = state.loopEnabled&&state.loopEnabled[tid];
+            const ar    = state.autoRespondEnabled&&state.autoRespondEnabled[tid];
+            const muted = state.mutedThreads&&state.mutedThreads[tid];
+            const tc    = threadCfg[tid]||{};
+            return `<tr>
+                <td class="td-mono">${esc(tid)}</td>
+                <td>${loop?`<span class="tag tag-g">ON</span>`:`<span class="tag tag-dim">OFF</span>`}</td>
+                <td>${ar?`<span class="tag tag-b">ON</span>`:`<span class="tag tag-dim">OFF</span>`}${muted?` <span class="tag tag-y">MUTED</span>`:""}</td>
+                <td>
+                    ${loop
+                        ? `<form method="POST" action="/api/thread/stoploop?tab=threads" style="display:inline;margin:0"><input type="hidden" name="threadID" value="${esc(tid)}"/><button class="btn-rm" type="submit">⏹ Stop</button></form>`
+                        : `<form method="POST" action="/api/thread/startloop?tab=threads" style="display:inline;margin:0"><input type="hidden" name="threadID" value="${esc(tid)}"/><button class="btn-add" type="submit" style="font-size:11px;padding:3px 10px">▶ Start</button></form>`
+                    }
+                </td>
+                <td>
+                    <form method="POST" action="/api/thread/config?tab=threads" style="display:flex;gap:6px;margin:0;align-items:center">
+                        <input type="hidden" name="threadID" value="${esc(tid)}"/>
+                        <input type="number" name="loopDelay" value="${tc.loopDelay!=null?tc.loopDelay:""}" placeholder="delay(s)" style="width:72px;padding:3px 6px;background:#1a1a2e;border:1px solid #333;color:#eee;border-radius:4px;font-size:11px"/>
+                        <input type="text" name="loopReact" value="${tc.loopReact||""}" placeholder="emoji" style="width:52px;padding:3px 6px;background:#1a1a2e;border:1px solid #333;color:#eee;border-radius:4px;font-size:11px"/>
+                        <button class="btn-add" type="submit" style="font-size:11px;padding:3px 10px">Save</button>
+                    </form>
+                </td>
+            </tr>`;
+        }).join("");
+
+    const pageThreads = `
+<div class="section-hd">Thread Manager</div>
+<div class="box" style="padding:0">
+    <div class="box-hd">
+        <span class="chip">THREADS</span><span class="box-title">Active Threads</span>
+        <span class="box-meta">${knownThreads.length} known</span>
+        <form method="POST" action="/api/thread/stopall?tab=threads" style="display:inline;margin:0;margin-left:auto">
+            <button class="btn-rm" type="submit" style="font-size:11px">⏹ Stop All Loops</button>
+        </form>
+    </div>
+    <table>
+        <thead><tr><th>Thread ID</th><th>Loop</th><th>Auto-Respond</th><th>Quick Actions</th><th style="width:260px">Per-Thread Config</th></tr></thead>
+        <tbody>${threadRows}</tbody>
+    </table>
+</div>
+
+<div class="section-hd" style="margin-top:20px">
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+    Whitelist Mode
+</div>
+<div class="box">
+    <div class="box-hd"><span class="chip chip-y">WHITELIST</span><span class="box-title">Restrict Commands</span><span class="box-meta">${wl.enabled?"ENABLED":"DISABLED"}</span></div>
+    <div style="padding:14px 16px">
+        <form method="POST" action="/api/whitelist/toggle?tab=threads" style="display:flex;gap:10px;align-items:center;margin-bottom:14px;flex-wrap:wrap">
+            <span style="color:#aaa;font-size:13px">Whitelist Mode: <strong style="color:${wl.enabled?"#4ade80":"#888"}">${wl.enabled?"ON":"OFF"}</strong></span>
+            <button class="btn-add" type="submit" style="font-size:12px;padding:4px 12px">${wl.enabled?"Disable":"Enable"}</button>
+        </form>
+        <div style="color:#888;font-size:12px;margin-bottom:12px">When enabled, only UIDs below (plus authorized UIDs) can use bot commands.</div>
+        <form method="POST" action="/api/whitelist/add?tab=threads" class="add-row">
+            <input class="add-input" type="text" name="uid" placeholder="Facebook UID to whitelist" autocomplete="off" required/>
+            <button class="btn-add" type="submit">+ Add</button>
+        </form>
+        <div class="q-list">${
+            wl.uids.length===0
+                ? `<div class="q-empty">No UIDs whitelisted yet</div>`
+                : wl.uids.map((uid,i)=>`
+                    <div class="qi">
+                        <span class="qi-num">${String(i+1).padStart(2,"0")}</span>
+                        <span class="qi-text">${esc(uid)}</span>
+                        <form method="POST" action="/api/whitelist/remove?tab=threads" style="margin:0">
+                            <input type="hidden" name="uid" value="${esc(uid)}"/>
+                            <button class="btn-rm" type="submit">✕</button>
+                        </form>
+                    </div>`).join("")
+        }</div>
+    </div>
+</div>`;
+
+    // ── PAGE: CUSTOM COMMANDS ─────────────────────────────────────────
+    const customCmds = readCustomCommands();
+    const cmdRows2 = customCmds.length===0
+        ? `<div class="q-empty">No custom commands yet — add one above</div>`
+        : customCmds.map((c,i)=>`
+            <div class="qi">
+                <span class="qi-num">${String(i+1).padStart(2,"0")}</span>
+                <code style="background:#111;padding:2px 8px;border-radius:4px;font-size:12px;color:#8ae4ff">!${esc(c.cmd)}</code>
+                <span class="qi-text" style="flex:1;margin-left:8px">→ ${esc(c.reply)}</span>
+                <form method="POST" action="/api/cmds/remove?tab=cmds" style="margin:0">
+                    <input type="hidden" name="index" value="${i}"/>
+                    <button class="btn-rm" type="submit">✕</button>
+                </form>
+            </div>`).join("");
+
+    const pageCmds = `
+<div class="section-hd">Custom Command Builder</div>
+<div class="box">
+    <div class="box-hd"><span class="chip chip-p">BUILDER</span><span class="box-title">Custom Commands</span><span class="box-meta">${customCmds.length} commands</span></div>
+    <form method="POST" action="/api/cmds/add?tab=cmds" class="add-row" style="gap:8px">
+        <span style="color:#888;font-size:14px;font-family:monospace;white-space:nowrap">!</span>
+        <input class="add-input" type="text" name="cmd" placeholder="command (no !)" autocomplete="off" required style="max-width:180px"/>
+        <input class="add-input" type="text" name="reply" placeholder="Bot reply text — use {name} for sender UID" autocomplete="off" required/>
+        <button class="btn-add" type="submit">+ Add</button>
+    </form>
+    <div style="color:#666;font-size:11px;padding:0 14px 10px">Available placeholders: <code>{name}</code> = sender UID</div>
+    <div class="q-list">${cmdRows2}</div>
+</div>`;
+
     // ── ASSEMBLE ──────────────────────────────────────────────────────
-    const pages = {dashboard:pageDashboard, loop:pageLoop, config:pageConfig, session:pageSession, commands:pageCommands};
+    const pages = {dashboard:pageDashboard, loop:pageLoop, threads:pageThreads, cmds:pageCmds, config:pageConfig, session:pageSession, commands:pageCommands};
     const content = pages[t] || pageDashboard;
 
     return `<!DOCTYPE html>
@@ -882,6 +1099,13 @@ tr:hover td{background:#ffffff03}
 .qi-url{color:var(--cy2);font-size:10.5px}
 .btn-rm{background:transparent;color:var(--t4);border:1px solid var(--b2);border-radius:5px;padding:3px 9px;font-size:11px;cursor:pointer;transition:all .15s}
 .btn-rm:hover{background:#e11d4815;border-color:#e11d4840;color:var(--rd3)}
+
+/* ── RATE GRAPH ── */
+.rate-graph{display:flex;align-items:flex-end;gap:2px;height:80px;padding:4px 0}
+.rg-col{display:flex;flex-direction:column;align-items:center;flex:1;height:100%}
+.rg-bar-wrap{flex:1;display:flex;align-items:flex-end;width:100%}
+.rg-bar{width:100%;background:linear-gradient(to top,#1d4ed8,#3b82f6);border-radius:2px 2px 0 0;min-height:2px;transition:height .3s}
+.rg-label{font-size:8px;color:var(--t4);margin-top:3px;white-space:nowrap;font-family:var(--mono)}
 
 /* ── TWO COL ── */
 .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
@@ -1397,6 +1621,118 @@ function startDashboard(port=5000) {
                 res.writeHead(200,{"Content-Type":"application/json"});
                 res.end(JSON.stringify({logs,state})); return;
             }
+            // ── /api/cmds/add
+            if (path2==="/api/cmds/add" && req.method==="POST") {
+                const fields = await parseBody(req);
+                const cmd  = (fields.cmd||"").trim().replace(/^!/,"").toLowerCase();
+                const reply= (fields.reply||"").trim();
+                if (!cmd||!reply){ htmlErr("Command and reply required."); return; }
+                const list = readCustomCommands();
+                if (!list.find(c=>c.cmd===cmd)) list.push({cmd,reply});
+                writeCustomCommands(list);
+                redirect(fields._tab||"cmds"); return;
+            }
+            // ── /api/cmds/remove
+            if (path2==="/api/cmds/remove" && req.method==="POST") {
+                const fields = await parseBody(req);
+                const idx = parseInt(fields.index);
+                const list = readCustomCommands();
+                if (!isNaN(idx) && idx>=0 && idx<list.length) list.splice(idx,1);
+                writeCustomCommands(list);
+                redirect(fields._tab||"cmds"); return;
+            }
+            // ── /api/whitelist/toggle
+            if (path2==="/api/whitelist/toggle" && req.method==="POST") {
+                const wl = readWhitelist();
+                wl.enabled = !wl.enabled;
+                writeWhitelist(wl);
+                redirect("threads"); return;
+            }
+            // ── /api/whitelist/add
+            if (path2==="/api/whitelist/add" && req.method==="POST") {
+                const fields = await parseBody(req);
+                const uid = (fields.uid||"").trim();
+                if (!uid){ htmlErr("UID required."); return; }
+                const wl = readWhitelist();
+                if (!wl.uids.includes(uid)) wl.uids.push(uid);
+                writeWhitelist(wl);
+                redirect("threads"); return;
+            }
+            // ── /api/whitelist/remove
+            if (path2==="/api/whitelist/remove" && req.method==="POST") {
+                const fields = await parseBody(req);
+                const uid = (fields.uid||"").trim();
+                const wl = readWhitelist();
+                wl.uids = wl.uids.filter(u=>u!==uid);
+                writeWhitelist(wl);
+                redirect("threads"); return;
+            }
+            // ── /api/thread/config
+            if (path2==="/api/thread/config" && req.method==="POST") {
+                const fields = await parseBody(req);
+                const tid = (fields.threadID||"").trim();
+                if (!tid){ htmlErr("threadID required."); return; }
+                const all = readThreadConfig();
+                all[tid] = all[tid]||{};
+                if (fields.loopDelay!=="") all[tid].loopDelay = parseFloat(fields.loopDelay)||1;
+                else delete all[tid].loopDelay;
+                if (fields.loopReact&&fields.loopReact.trim()) all[tid].loopReact = fields.loopReact.trim();
+                else delete all[tid].loopReact;
+                writeThreadConfig(all);
+                redirect("threads"); return;
+            }
+            // ── /api/thread/startloop
+            if (path2==="/api/thread/startloop" && req.method==="POST") {
+                const fields = await parseBody(req);
+                const tid = (fields.threadID||"").trim();
+                if (tid && _loopControlCb) _loopControlCb("start", tid);
+                redirect("threads"); return;
+            }
+            // ── /api/thread/stoploop
+            if (path2==="/api/thread/stoploop" && req.method==="POST") {
+                const fields = await parseBody(req);
+                const tid = (fields.threadID||"").trim();
+                if (tid && _loopControlCb) _loopControlCb("stop", tid);
+                redirect("threads"); return;
+            }
+            // ── /api/thread/stopall
+            if (path2==="/api/thread/stopall" && req.method==="POST") {
+                if (_loopControlCb) {
+                    const active = Object.keys(state.loopEnabled||{}).filter(tid=>state.loopEnabled[tid]);
+                    active.forEach(tid=>_loopControlCb("stop",tid));
+                }
+                redirect("threads"); return;
+            }
+            // ── /api/cookie/slot
+            if (path2==="/api/cookie/slot" && req.method==="POST") {
+                const fields = await parseBody(req);
+                const slotFile = (fields.slot||"fbstate.json").replace(/[^a-zA-Z0-9_.]/g,"");
+                const jsonStr = (fields.fbstate||"").trim();
+                if (!jsonStr){ htmlErr("No cookie data provided."); return; }
+                let parsed;
+                try{ parsed=JSON.parse(jsonStr); }catch(e){ htmlErr("Invalid JSON: "+String(e)); return; }
+                if (!Array.isArray(parsed)){ htmlErr("fbstate must be a JSON array."); return; }
+                if (!parsed.some(c=>c.key==="c_user")){ htmlErr("No c_user cookie found."); return; }
+                const slotPath = path.join(DATA_DIR, slotFile);
+                fs.writeFileSync(slotPath, JSON.stringify(parsed,null,2),"utf8");
+                addAlert("info", `Cookie slot ${slotFile} updated`);
+                if (slotFile==="fbstate.json") {
+                    resetAll();
+                    if (_cookieUpdateCb) _cookieUpdateCb();
+                    res.writeHead(302,{Location:"/?page=login-process"});res.end();
+                } else {
+                    redirect("session");
+                }
+                return;
+            }
+            // ── /api/hourly-stats
+            if (path2==="/api/hourly-stats" && req.method==="GET") {
+                json(getHourlyStats()); return;
+            }
+            // ── /api/alerts
+            if (path2==="/api/alerts" && req.method==="GET") {
+                json(alerts); return;
+            }
             // ── Show login process page
             if (path2==="/" && url.searchParams.get("page")==="login-process") {
                 let html;
@@ -1580,4 +1916,4 @@ setTimeout(poll, 1000);
 </html>`;
 }
 
-module.exports = { startDashboard, addLog, state, setCookieUpdateHandler };
+module.exports = { startDashboard, addLog, state, setCookieUpdateHandler, setLoopControlHandler, trackMessage, addAlert };
