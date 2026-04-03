@@ -1598,7 +1598,9 @@ function startDashboard(port=5000) {
             }
             // ── /api/login-status — polling endpoint for login process page
             if (path2==="/api/login-status" && req.method==="GET") {
-                json({loggedIn:state.loggedIn, botName:state.botName, loginInProgress:state.loginInProgress}); return;
+                const allExpired = state.bots.length > 0 && state.bots.every(b => b.expired);
+                const anyExpired = state.bots.some(b => b.expired);
+                json({loggedIn:state.loggedIn, botName:state.botName, loginInProgress:state.loginInProgress, expired: allExpired, anyExpired}); return;
             }
             // ── /api/fbstate/update — form POST from Cookie tab
             if (path2==="/api/fbstate/update" && req.method==="POST") {
@@ -1756,7 +1758,17 @@ function startDashboard(port=5000) {
             try{res.writeHead(500);res.end("Server error: "+e.message);}catch(_){}
         }
     });
-    server.on("error",err=>console.error("[cozy-bot] Dashboard error:",err));
+    server.on("error", err => {
+        if (err.code === "EADDRINUSE") {
+            console.error(`[cozy-bot] Port ${port} in use, retrying in 3s...`);
+            setTimeout(() => {
+                server.close();
+                server.listen(port, "0.0.0.0", () => console.log(`[cozy-bot] Dashboard running on port ${port}`));
+            }, 3000);
+        } else {
+            console.error("[cozy-bot] Dashboard error:", err);
+        }
+    });
     server.listen(port,"0.0.0.0",()=>console.log(`[cozy-bot] Dashboard running on port ${port}`));
     _httpServer = server;
 }
@@ -1841,6 +1853,7 @@ body{font-family:var(--sans);color:var(--t1);display:flex;align-items:center;jus
 
 /* ── PHASE: TIMEOUT ── */
 #phaseTimeout{display:none;flex-direction:column;align-items:center;gap:14px}
+#phaseFailed{display:none;flex-direction:column;align-items:center;gap:14px}
 .timeout-icon{font-size:40px}
 .timeout-msg{font-size:13px;color:var(--t3);line-height:1.7;max-width:320px}
 .btn-dash{margin-top:8px;padding:12px 28px;background:linear-gradient(135deg,#1d4ed8,#7c3aed);color:#fff;border:none;border-radius:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:var(--sans);letter-spacing:-.01em;transition:all .2s}
@@ -1887,8 +1900,15 @@ body{font-family:var(--sans);color:var(--t1);display:flex;align-items:center;jus
     <!-- TIMEOUT -->
     <div id="phaseTimeout">
         <div class="timeout-icon">⏱</div>
-        <div class="timeout-msg">Login is taking longer than expected. The bot may still be connecting. You can go to the dashboard now.</div>
+        <div class="timeout-msg">Login is taking longer than expected. The bot may still be connecting in the background.</div>
         <button class="btn-dash" onclick="location.href='/?tab=dashboard'">Go to Dashboard →</button>
+    </div>
+
+    <!-- FAILED -->
+    <div id="phaseFailed">
+        <div class="timeout-icon">❌</div>
+        <div class="timeout-msg" id="failedMsg">Cookie rejected by Facebook — your session may be expired. Please export a fresh cookie and try again.</div>
+        <button class="btn-dash" onclick="location.href='/?tab=session'">Update Cookie →</button>
     </div>
 </div>
 
@@ -1896,10 +1916,12 @@ body{font-family:var(--sans);color:var(--t1);display:flex;align-items:center;jus
 const phaseLogin   = document.getElementById('phaseLogin');
 const phaseSuccess = document.getElementById('phaseSuccess');
 const phaseTimeout = document.getElementById('phaseTimeout');
+const phaseFailed  = document.getElementById('phaseFailed');
 const botNameEl    = document.getElementById('botNameEl');
+const failedMsg    = document.getElementById('failedMsg');
 
 let attempts = 0;
-const MAX_ATTEMPTS = 80;
+const MAX_ATTEMPTS = 40;
 
 async function poll() {
     attempts++;
@@ -1916,6 +1938,12 @@ async function poll() {
             phaseLogin.style.display   = 'none';
             phaseSuccess.style.display = 'flex';
             setTimeout(() => { location.href = '/?tab=dashboard'; }, 2800);
+            return;
+        }
+        if (data.anyExpired) {
+            failedMsg.textContent = 'Cookie rejected by Facebook — session expired or blocked. Export a fresh cookie from your browser and try again.';
+            phaseLogin.style.display  = 'none';
+            phaseFailed.style.display = 'flex';
             return;
         }
     } catch(_) {}
