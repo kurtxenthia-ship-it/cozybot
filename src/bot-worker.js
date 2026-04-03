@@ -78,6 +78,7 @@ const loopTimers    = {};
 const loopIndex     = {};
 const loopCounts    = {};
 const loopAutoStop  = {};
+const pmThreads     = {};
 const spamTracker   = {};
 const settingBanner     = {};
 const settingGroupName  = {};
@@ -154,17 +155,21 @@ function checkAntiSpam(senderID,threadID,cfg) {
 function isUID(str) { return /^\d{10,20}$/.test((str||"").trim()); }
 
 // ─── LOOP ─────────────────────────────────────────────────────────────────────
-function startLoop(api, threadID) {
+function startLoop(api, threadID, isPM = false) {
     if (loopActive[threadID]) { log("warn",`Loop already active in ${threadID}`); return; }
+    if (isPM) pmThreads[threadID] = true;
     loopActive[threadID] = true;
     loopCounts[threadID] = 0;
     if (!loopIndex[threadID]) loopIndex[threadID] = 0;
     sharedState.loopEnabled[threadID] = true;
     send("stateUpdate", { loopEnabled: sharedState.loopEnabled });
-    log("info", `Loop STARTED in thread ${threadID}`);
+    log("info", `Loop STARTED in thread ${threadID} (pm=${isPM})`);
 
     const cfg0 = getBotConfig();
-    if (cfg0.loopStartMsg) api.sendMessage(cfg0.loopStartMsg, threadID, ()=>{});
+    const isGroupThread = !pmThreads[threadID];
+    const _send = (msg, cb) => api.sendMessage(msg, threadID, cb, null, isGroupThread);
+
+    if (cfg0.loopStartMsg) _send(cfg0.loopStartMsg, ()=>{});
     if (cfg0.autoStopMinutes > 0) {
         if (loopAutoStop[threadID]) clearTimeout(loopAutoStop[threadID]);
         loopAutoStop[threadID] = setTimeout(()=>{ log("info",`Loop auto-stopped in ${threadID}`); stopLoop(threadID,api); }, cfg0.autoStopMinutes*60000);
@@ -187,6 +192,8 @@ function startLoop(api, threadID) {
         loopCounts[threadID]++;
         const useImage = !cfg.reactOnlyMode && Math.random() < ((cfg.imageProbability||20)/100);
         const imageUrl = getRandomImageUrl();
+        const isGrp = !pmThreads[threadID];
+        const __send = (msg, cb) => api.sendMessage(msg, threadID, cb, null, isGrp);
 
         function onSent(err, msgInfo) {
             if (err) { log("warn",`Loop send error in ${threadID}: ${err.message||err}`); }
@@ -199,10 +206,10 @@ function startLoop(api, threadID) {
         const loopMsg = loopSilent ? {body: all[idx], silent: true} : all[idx];
         if (useImage && imageUrl) {
             axios.get(imageUrl,{responseType:"stream",timeout:15000})
-                .then(r=>api.sendMessage(loopSilent ? {attachment:r.data, silent:true} : {attachment:r.data},threadID,onSent))
-                .catch(()=>api.sendMessage(loopMsg,threadID,onSent));
+                .then(r=>__send(loopSilent ? {attachment:r.data, silent:true} : {attachment:r.data},onSent))
+                .catch(()=>__send(loopMsg,onSent));
         } else {
-            api.sendMessage(loopMsg, threadID, onSent);
+            __send(loopMsg, onSent);
         }
     }
     sendNext();
@@ -218,7 +225,9 @@ function stopLoop(threadID, api) {
     send("stateUpdate", { loopEnabled: sharedState.loopEnabled });
     log("info", `Loop STOPPED in thread ${threadID}`);
     const cfg = getBotConfig();
-    if (api && cfg.loopStopMsg) api.sendMessage(cfg.loopStopMsg, threadID, ()=>{});
+    const isGrpStop = !pmThreads[threadID];
+    if (api && cfg.loopStopMsg) api.sendMessage(cfg.loopStopMsg, threadID, ()=>{}, null, isGrpStop);
+    delete pmThreads[threadID];
 }
 
 // ─── AUTO-RESPOND (groups only, !on / !off) ───────────────────────────────────
@@ -428,7 +437,7 @@ function startBot() {
                     if (loopActive[threadID]) {
                         stopLoop(threadID, api);
                     } else {
-                        startLoop(api, threadID);
+                        startLoop(api, threadID, isPM);
                     }
                     return;
                 }
@@ -443,23 +452,26 @@ function startBot() {
                         stopLoop(targetID, api);
                         log("info",`DOT-PM loop OFF → ${targetID}`);
                     } else {
-                        startLoop(api, targetID);
+                        startLoop(api, targetID, true);
                         log("info",`DOT-PM loop ON → ${targetID}`);
                     }
                 } else {
                     // Name → search friends list
                     api.getFriendsList((err, friends) => {
-                        if (err || !friends) { log("warn","Could not fetch friends list."); return; }
+                        if (err || !friends) { log("warn","Could not fetch friends list: "+(err?.message||err)); return; }
+                        if (!friends || typeof friends !== "object") { log("warn","Friends list empty or invalid."); return; }
                         const query = dotArg.toLowerCase();
-                        const match = Object.entries(friends).find(([,f]) => (f.name||f.fullName||"").toLowerCase().includes(query));
-                        if (!match) { log("warn",`No friend found matching "${dotArg}".`); return; }
-                        const [targetUID] = match;
+                        const entries = Object.entries(friends);
+                        const match = entries.find(([,f]) => (f.name||f.fullName||"").toLowerCase().includes(query));
+                        if (!match) { log("warn",`No friend found matching "${dotArg}". (${entries.length} friends loaded)`); return; }
+                        const [targetUID, friendInfo] = match;
+                        const friendName = friendInfo.name || friendInfo.fullName || targetUID;
                         if (loopActive[targetUID]) {
                             stopLoop(targetUID, api);
-                            log("info",`DOT-PM loop OFF → ${targetUID} (${match[1].name||match[1].fullName})`);
+                            log("info",`DOT-PM loop OFF → ${targetUID} (${friendName})`);
                         } else {
-                            startLoop(api, targetUID);
-                            log("info",`DOT-PM loop ON → ${targetUID} (${match[1].name||match[1].fullName})`);
+                            startLoop(api, targetUID, true);
+                            log("info",`DOT-PM loop ON → ${targetUID} (${friendName})`);
                         }
                     });
                 }
@@ -734,7 +746,7 @@ function startBot() {
             if (cmd==="looppm") {
                 const uid=args[1];
                 if(!uid||!isUID(uid)) return;
-                if(!loopActive[uid]) startLoop(api,uid);
+                if(!loopActive[uid]) startLoop(api,uid,true);
                 return;
             }
             // ── !stoppm — stop PM loop with a UID
