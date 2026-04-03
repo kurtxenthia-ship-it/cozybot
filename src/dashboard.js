@@ -1887,7 +1887,7 @@ const phaseTimeout = document.getElementById('phaseTimeout');
 const botNameEl    = document.getElementById('botNameEl');
 
 let attempts = 0;
-const MAX_ATTEMPTS = 40;
+const MAX_ATTEMPTS = 80;
 
 async function poll() {
     attempts++;

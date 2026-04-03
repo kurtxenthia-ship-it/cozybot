@@ -132,15 +132,11 @@ setLoopControlHandler((action, threadID) => {
 });
 
 setCookieUpdateHandler(() => {
-    addLog("info","🔄 Cookie updated — restarting all bot workers…");
+    addLog("info","🔄 Cookie updated — performing full restart (web + bots)…");
     killAllWorkers();
-    sharedState.loopEnabled        = {};
-    sharedState.autoRespondEnabled = {};
-    sharedState.mutedThreads       = {};
-    sharedState.nicknameMap        = {};
-    sharedState.antiRestrict       = false;
-    sharedState.antiChat           = {};
-    setTimeout(() => startAllBots(), 1500);
+    setTimeout(() => {
+        process.exit(0);
+    }, 800);
 });
 
 startAllBots();
