@@ -3,7 +3,7 @@
 const { fork } = require("child_process");
 const fs   = require("fs");
 const path = require("path");
-const { startDashboard, addLog, state, setCookieUpdateHandler, setLoopControlHandler, trackMessage, addAlert, shutdown } = require("./dashboard");
+const { startDashboard, addLog, state, setCookieUpdateHandler, setLoopControlHandler, trackMessage, addAlert } = require("./dashboard");
 
 const DEVELOPER_ID = "61585831139336";
 const EXTRA_ADMINS = ["61580437366762", "61586419022838"];
@@ -27,6 +27,7 @@ const sharedState = {
 };
 
 const activeWorkers = [];
+let intentionalKill = false;
 
 function broadcastSharedState() {
     for (const w of activeWorkers) {
@@ -35,10 +36,13 @@ function broadcastSharedState() {
 }
 
 function killAllWorkers() {
+    intentionalKill = true;
     while (activeWorkers.length > 0) {
         const w = activeWorkers.pop();
         try { w.removeAllListeners(); w.kill("SIGKILL"); } catch(_){}
     }
+    state.bots.splice(0, state.bots.length);
+    intentionalKill = false;
 }
 
 function startAllBots() {
@@ -68,6 +72,7 @@ function startAllBots() {
         state.bots.push(botState);
 
         function spawnWorker() {
+            if (intentionalKill) return;
             const child = fork(WORKER_PATH, [fbstatePath, label, DEVELOPER_ID, ...EXTRA_ADMINS], { silent:false });
             activeWorkers[i] = child;
 
@@ -107,12 +112,13 @@ function startAllBots() {
             });
 
             child.on("exit", (code) => {
+                if (intentionalKill) return;
                 botState.loggedIn = false;
                 if (!botState.expired) {
                     addLog("warn",`[${label}] Worker exited (code ${code}), restarting in 10s...`);
                     addAlert("warn", `[${label}] Worker crashed (code ${code}), restarting...`);
                     botState.reconnecting = true;
-                    setTimeout(()=>{ botState.reconnecting=false; spawnWorker(); }, 10000);
+                    setTimeout(()=>{ if (!intentionalKill) { botState.reconnecting=false; spawnWorker(); } }, 10000);
                 } else {
                     addLog("error",`[${label}] Session expired. Update the cookie from the dashboard.`);
                     addAlert("error", `[${label}] Cookie expired — please update in Cookie tab`);
@@ -136,11 +142,19 @@ setLoopControlHandler((action, threadID) => {
 });
 
 setCookieUpdateHandler(() => {
-    addLog("info","🔄 Cookie updated — performing full restart (web + bots)…");
+    addLog("info","Cookie updated — restarting bots with new cookie…");
+    addAlert("info","Cookie updated — restarting bots now…");
     killAllWorkers();
-    shutdown(() => {
-        process.exit(0);
-    });
+    state.botName          = "";
+    state.totalRepliesSent = 0;
+    state.loginInProgress  = true;
+    sharedState.loopEnabled        = {};
+    sharedState.autoRespondEnabled = {};
+    sharedState.mutedThreads       = {};
+    state.loopEnabled        = {};
+    state.autoRespondEnabled = {};
+    state.mutedThreads       = {};
+    setTimeout(startAllBots, 2000);
 });
 
 startAllBots();
