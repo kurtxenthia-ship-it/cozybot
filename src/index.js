@@ -42,6 +42,8 @@ function killAllWorkers() {
 }
 
 function startAllBots() {
+    try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch(_) {}
+
     let files;
     try {
         files = fs.readdirSync(DATA_DIR)
@@ -49,11 +51,13 @@ function startAllBots() {
             .sort();
     } catch(e) {
         addLog("error","Cannot read data/ directory: "+e.message);
-        process.exit(1);
+        addAlert("error","Cannot read data/ directory — please add a cookie via the Cookie tab.");
+        return;
     }
     if (!files.length) {
-        addLog("error","No fbstate*.json files found in data/.");
-        process.exit(1);
+        addLog("warn","No fbstate*.json files found in data/ — dashboard running, awaiting cookie.");
+        addAlert("warn","No cookie found — go to the Cookie tab and paste your fbstate to start the bot.");
+        return;
     }
     addLog("info",`Found ${files.length} bot account(s): ${files.join(", ")}`);
 
