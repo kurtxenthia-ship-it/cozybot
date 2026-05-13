@@ -3,7 +3,8 @@
 const { fork } = require("child_process");
 const fs   = require("fs");
 const path = require("path");
-const { startDashboard, addLog, state, setCookieUpdateHandler, setLoopControlHandler, trackMessage, addAlert } = require("./dashboard");
+const auth = require("./auth");
+const { startDashboard, addLog, state, setCookieUpdateHandler, setLoopControlHandler, trackMessage, addAlert, setAccountInfoForUser } = require("./dashboard");
 
 const DEVELOPER_ID = "61585831139336";
 const EXTRA_ADMINS = ["61580437366762", "61586419022838"];
@@ -15,6 +16,7 @@ process.on("unhandledRejection", r   => { try { addLog("error","Rejection: "+(r?
 
 state.developerID = DEVELOPER_ID;
 
+auth.init();
 startDashboard(process.env.PORT || 5000);
 
 const sharedState = {
@@ -107,6 +109,9 @@ function startAllBots() {
                         break;
                     case "alert":
                         if (msg.alertType && msg.message) addAlert(msg.alertType, msg.message);
+                        break;
+                    case "accountInfo":
+                        if (msg.data) setAccountInfoForUser(msg.data);
                         break;
                 }
             });

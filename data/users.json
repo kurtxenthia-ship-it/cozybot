@@ -1,0 +1,14 @@
+[
+  {
+    "id": "admin_001",
+    "username": "Admin",
+    "email": "kenzohaizen@gmail.com",
+    "passwordHash": "$2b$10$lTgmDGF4Gke3A/uUoAHb3.ASheHi5GsQUvtwpS8R9KUuQB7v6hJjC",
+    "isAdmin": true,
+    "isBanned": false,
+    "banReason": "",
+    "createdAt": "2026-05-13T11:07:39.953Z",
+    "lastSeen": "2026-05-13T11:11:43.306Z",
+    "sessionStart": "2026-05-13T11:11:43.044Z"
+  }
+]

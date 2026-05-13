@@ -1,114 +1,142 @@
-# Cozy Bot — Facebook Messenger Auto-Reply Bot
+# DUMMYL BOT — Facebook Messenger Automation Platform
 
-## What it does
-- Logs into Facebook Messenger using cookies (fbstate.json)
-- Auto-replies with random messages from a configurable pool
-- Full command system prefixed with `!` (developer-only for most commands)
-- Dot (`.`) trigger toggles the loop in any chat — group OR PM
-- Web dashboard at port 5000 for real-time management
+## Overview
+Full-featured Facebook Messenger bot management dashboard with login/auth system, red/black pro design, collapsible sidebar, and multi-user support.
 
 ## Developer
-- **FB ID:** 61585831139336
-- **Prefix:** `!`
+- **Name:** Kyle Gaspari (cozy)
+- **Admin Email:** kenzohaizen@gmail.com
+- **Admin Password:** cozy24123
+- **FB Developer ID:** 61585831139336
+- **Bot Prefix:** `!`
 
-## Dashboard (Cozy Bot Panel)
-- Branded as "Cozy Bot Panel" (not CZB)
-- Dark navy/blue pro design (#060c17 background, electric blue + cyan accents)
-- SVG icons throughout — nav tabs, stat cards, hero, section headers
-- Tabs: Dashboard, Loop Queue, Threads, Custom Cmds, Config, Cookie, Commands
-- Cookie tab: beautiful "Enter Your Cookie" intro page with 4-step guide card, gradient button
-- Stat cards: colored glow effects (blue, cyan, purple, emerald), SVG icons
-- Hero section has gradient top border and animated glow
+## Login System
+- Visit the site → redirected to login page
+- Register new accounts or log in
+- Admin account auto-created (kenzohaizen@gmail.com / cozy24123)
+- Admin gets extra **Admin Panel** tab to manage users
+- Sessions stored in memory; user records in `data/users.json`
+- Passwords hashed with bcryptjs (never stored in plaintext)
 
-## New Features (v2.2)
-- **Cookie Reset**: Changing cookie resets all logs/stats/loop state and restarts workers
-- **Login Process Screen**: Animated "LOGGING IN..." → "SUCCESSFULLY LOGGED AS [NAME]" flow
-- **PM Loop Fix**: Uses `pmThreads` map to track PM vs group, passes explicit `isGroup` flag to FCA's sendMessage (5th arg)
-- **Bot Name in Status**: Bot sends `botName` via IPC on login; shown in dashboard header
-- **Message Rate Graph**: Dashboard shows 24-hour hourly message volume bar chart
-- **Thread Manager** (Threads tab): Table of all known threads with loop status, quick start/stop loop buttons, per-thread config (delay, react emoji), "Stop All Loops" global action
-- **Custom Command Builder** (Custom Cmds tab): Add/remove `!cmd` → reply mappings via dashboard UI; enforced in bot-worker with `{name}` placeholder support
-- **Multi-Cookie Manager** (Cookie tab): Manage fbstate.json, fbstate2.json, fbstate3.json as separate slots; each shows bot status
-- **Whitelist Mode** (Threads tab): Enable/disable whitelist; add/remove UIDs; enforced in message handler
-- **Notification Feed** (Dashboard tab): Shows recent alert events (cookie expired, crashes, etc.)
-- **Per-Thread Config**: Override `loopDelay` and `loopReact` per thread ID from dashboard
+## Dashboard Design (v2.2)
+- **Branding:** DUMMYL BOT
+- **Theme:** Red (#dc2626) + Black (#080808) + White
+- **Layout:** Collapsible left sidebar (250px → 64px icon-only)
+- **Sidebar tabs:**
+  - DASHBOARD — all bot controls (7 inner tabs)
+  - ACCOUNT STATUS — FB account info, stats, notifications
+  - ABOUT — developer info (Kyle Gaspari)
+  - ADMIN PANEL (admin only) — user management
 
-## Data Files
-- `data/custom_commands.json` — array of `{cmd, reply}` custom command pairs
-- `data/whitelist.json` — `{enabled: bool, uids: []}` whitelist config
-- `data/thread_config.json` — per-thread overrides `{[threadID]: {loopDelay, loopReact}}`
-- `data/bot_config.json` — global bot settings
-- `data/fbstate.json` — primary bot cookie (slot 1)
-- `data/fbstate2.json` — secondary bot cookie (slot 2, optional)
-- `data/fbstate3.json` — tertiary bot cookie (slot 3, optional)
+## Dashboard Inner Tabs
+1. **Overview** — hero stats, hourly message graph, thread registry, live console
+2. **Loop Queue** — text and image pool management
+3. **Threads** — thread manager, whitelist, loop controls
+4. **Config** — full bot configuration (loop, auto-respond, TTS, security, etc.)
+5. **Cookie** — fbstate.json slot manager with step-by-step guide
+6. **Custom Cmds** — `!cmd` → reply builder
+7. **Commands** — full command reference
 
-## API Endpoints (Dashboard)
-- `POST /api/cmds/add` — add custom command
-- `POST /api/cmds/remove` — remove custom command by index
-- `POST /api/whitelist/toggle` — toggle whitelist on/off
-- `POST /api/whitelist/add` — add UID to whitelist
-- `POST /api/whitelist/remove` — remove UID from whitelist
-- `POST /api/thread/config` — save per-thread loopDelay/loopReact
-- `POST /api/thread/startloop` — remote-start loop for a thread
-- `POST /api/thread/stoploop` — remote-stop loop for a thread
-- `POST /api/thread/stopall` — stop all active loops
-- `POST /api/cookie/slot` — save cookie to any fbstate slot
-- `GET /api/hourly-stats` — hourly message count array (24 values)
-- `GET /api/alerts` — notification feed events
+## Bot Commands
 
-## Lock Banner Fix
-- `setGroupBanner` now downloads image as `arraybuffer` then creates a fresh `Readable` stream (fixes stream-already-consumed bug)
-- `settingBanner[tid]` flag now stays `true` for 3 seconds AFTER `changeGroupImage` callback to prevent race condition where the bot's own image change event triggers infinite restore loop
-
-## PM Loop Fix
-- Bot-worker now accepts both `"message"` and `"message_reply"` event types
-- ws3-fca can route PM messages as either type via MQTT; previous code filtered out `message_reply` events causing silent drops of the dot trigger in PMs
-
-## Commands
 ### Loop
 - `. (dot)` — toggle loop ON/OFF in any chat (group or PM)
-- `!stop` — force-stop the loop
-- `!status` — show loop + auto-respond status
+- `. <uid/name>` — toggle PM loop with user
+- `!stop`, `!looppm <uid>`, `!stoppm <uid>`
+- `!schedule <sec> <msg>`
 
 ### Auto-Respond (groups only)
-- `!on` / `!off` — enable/disable auto-respond
-- `!mute` / `!unmute` — pause/resume auto-respond
-- `!broadcast <text>` — send to all active auto-respond threads
+- `!on` / `!off` / `!mute` / `!unmute`
+- `!broadcast <text>`
 
 ### Group Management
-- `!nn <name>`, `!cg <name>`, `!banner [url]`
-- `!kick <uid>`, `!add <uid>`, `!emoji`, `!color`
-- `!freeze` / `!unfreeze`, `!lock`
-- `!perms <uid> <time>`, `!revoke [uid]`
+- `!nn <name>`, `!nn1 <uid> <name>`, `!clearnn`
+- `!cg <name>`, `!uncg`, `!banner [url]`, `!unbanner`
+- `!kick`, `!add`, `!promote`, `!demote <uid>`
+- `!emoji`, `!color <name>`, `!freeze`, `!unfreeze`
+- `!gmute`, `!gunmute <uid>`, `!perms <uid> <time>`, `!revoke`
+
+### Voice & Music
+- `!vm <text>` — TTS voice message (Google TTS)
+- `!vmpm <uid> <text>` — TTS to a PM
+- `!p <song name>` — Search YouTube and send song as audio attachment
+- `!p <youtube url>` — Send YouTube audio directly
 
 ### Utilities
-- `!say`, `!vm` (TTS), `!spam`, `!seen`, `!count`
-- `!info`, `!id`, `!myid`, `!test`, `!help`
-- `!gp`, `!antirestrict`, `!antichat`
+- `!say`, `!spam`, `!count`, `!react <emoji>`, `!seen`
+- `!id`, `!myid`, `!info`, `!status`, `!lock`, `!members`
+- `!forward <tid> <msg>`, `!gp [url/off]`, `!antirestrict`, `!test`, `!help`
 
-### Fun / Unexpected
-- `!flip` — coin flip
-- `!roll [sides]` — dice roll
-- `!8ball <q>` — magic 8 ball
-- `!pick a | b | c` — random picker
-- `!reverse <text>` — reverse text
-- `!shout <text>` — ALL CAPS spaced out
-- `!mock <text>` — aLtErNaTiNg cAsE
-- `!clap <text>` — clap between words
-- `!timer <sec>` — countdown ping
-- `!repeat <n> <text>` — stack message n times
+### Fun
+- `!flip`, `!roll [sides]`, `!8ball <q>`, `!pick a|b|c`
+- `!reverse`, `!shout`, `!mock`, `!clap`, `!timer <sec>`, `!repeat <n> <text>`
+
+## Data Files
+- `data/users.json` — registered user accounts (auth)
+- `data/fbstate.json` — primary bot cookie (slot 1)
+- `data/fbstate2.json` — secondary (slot 2, optional)
+- `data/fbstate3.json` — tertiary (slot 3, optional)
+- `data/custom_replies.json` — loop message pool
+- `data/image_replies.json` — loop image URLs
+- `data/custom_commands.json` — custom `!cmd` → reply pairs
+- `data/whitelist.json` — whitelist config
+- `data/thread_config.json` — per-thread overrides
+- `data/bot_config.json` — global bot settings
+
+## API Endpoints
+All endpoints require auth (dbl_sess cookie). Returns HTML or JSON.
+
+### Auth
+- `POST /api/auth/login` — login (form: email, password)
+- `POST /api/auth/register` — register (form: username, email, password, confirm)
+- `POST /api/auth/logout` — logout
+
+### Bot
+- `POST /api/replies/add` / `POST /api/replies/remove`
+- `POST /api/images/add` / `POST /api/images/remove`
+- `POST /api/config/save`
+- `POST /api/cookie/slot`
+- `POST /api/cmds/add` / `POST /api/cmds/remove`
+- `POST /api/whitelist/toggle` / `add` / `remove`
+- `POST /api/thread/config` / `startloop` / `stoploop` / `stopall`
+- `GET /api/status` — bot status JSON
+- `GET /api/hourly-stats` — 24-hour message count array
+- `GET /api/alerts` — recent alert events
+
+### Admin (admin only)
+- `POST /admin/ban` — ban user (form: userId)
+- `POST /admin/unban` — unban user
+- `POST /admin/delete` — delete user account
 
 ## Tech Stack
-- Node.js (plain JS)
+- Node.js (plain JS, no frameworks)
 - ws3-fca — Facebook Messenger API (MQTT-based)
 - Multi-process: main index.js spawns bot-worker.js per fbstate file
-- Plain HTTP dashboard (no frameworks)
-- Data: `data/fbstate.json`, `data/custom_replies.json`, `data/image_replies.json`, `data/bot_config.json`
+- bcryptjs — password hashing
+- @distube/ytdl-core — YouTube audio download for `!p` command
+- youtube-search-api — YouTube search (no API key needed)
+- Plain HTTP server (no Express)
+- JSON file storage for auth
 
 ## Files
 - `src/index.js` — main process, spawns workers, runs dashboard
-- `src/bot-worker.js` — bot logic, event handling, all commands
-- `src/dashboard.js` — web dashboard HTML + HTTP server
+- `src/dashboard.js` — full HTTP server + HTML dashboard (red/black theme)
+- `src/auth.js` — user auth module (register, login, sessions)
+- `src/bot-worker.js` — bot logic, all commands including `!p`
 - `src/replies.js` — built-in reply pool and image URLs
 - `data/` — persistent state and config
-- `ws3-fca/` — bundled Facebook API library
+
+## Render Deployment
+1. Push code to GitHub (`git push origin main`)
+2. Go to https://dashboard.render.com → New → Web Service
+3. Connect GitHub repo: `kurtxenthia-ship-it/cozybot`
+4. Render auto-detects `render.yaml` and configures the service
+5. Service name: `dummylbot`, port: 10000
+6. Add environment variable if needed (none required)
+7. Click Deploy
+
+## User Preferences
+- No emojis in code unless part of bot output
+- Keep all bot logic in bot-worker.js
+- Dashboard is a full rewrite every time (no partial HTML editing)
+- Auth session cookie name: `dbl_sess`

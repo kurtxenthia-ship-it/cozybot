@@ -787,6 +787,54 @@ function startBot() {
                 setTimeout(()=>api.sendMessage(txt,threadID,()=>{}),sec*1000);
                 return;
             }
+            // ── !p — play song via voice message (YouTube search or URL)
+            if (cmd==="p") {
+                const query = args.slice(1).join(" ").trim();
+                if (!query) { api.sendMessage("Usage: !p <song name> or !p <youtube url>", threadID, ()=>{}); return; }
+                api.sendMessage(`Searching: "${query.slice(0,60)}"...`, threadID, ()=>{});
+                const ytdl = require("@distube/ytdl-core");
+                const ytSearch = require("youtube-search-api");
+                const tmp = `/tmp/song_${Date.now()}.mp4`;
+                async function downloadAndSend(videoUrl) {
+                    try {
+                        const info = await ytdl.getBasicInfo(videoUrl);
+                        const title = info.videoDetails.title;
+                        const dur   = parseInt(info.videoDetails.lengthSeconds);
+                        if (dur > 600) { api.sendMessage(`Song too long (max 10 min). Found: "${title}"`, threadID, ()=>{}); return; }
+                        const stream = ytdl(videoUrl, { filter:"audioonly", quality:"lowestaudio" });
+                        const { createWriteStream } = require("fs");
+                        const ws = createWriteStream(tmp);
+                        stream.pipe(ws);
+                        ws.on("finish", () => {
+                            api.sendMessage({ body:`Now playing: ${title}`, attachment: fs.createReadStream(tmp) }, threadID, err => {
+                                try { fs.unlinkSync(tmp); } catch(_) {}
+                                if (err) log("warn", `!p send error: ${err}`);
+                                else send("totalReply");
+                            });
+                        });
+                        ws.on("error", err => { log("warn", `!p write error: ${err}`); try { fs.unlinkSync(tmp); } catch(_) {} });
+                        stream.on("error", err => { log("warn", `!p stream error: ${err}`); api.sendMessage("Could not download that song. Try another.", threadID, ()=>{}); try { fs.unlinkSync(tmp); } catch(_) {} });
+                    } catch(err) {
+                        log("warn", `!p error: ${err.message}`);
+                        api.sendMessage("Could not play that song. Try a different query.", threadID, ()=>{});
+                    }
+                }
+                const isYtUrl = /youtu(?:be\.com|\.be)/.test(query);
+                if (isYtUrl) {
+                    downloadAndSend(query);
+                } else {
+                    ytSearch.GetListByKeyword(query, false, 5).then(results => {
+                        const items = (results && results.items) || [];
+                        const video = items.find(i => i.type === "video" || (i.id && i.title));
+                        if (!video) { api.sendMessage(`No results found for: "${query}"`, threadID, ()=>{}); return; }
+                        downloadAndSend(`https://www.youtube.com/watch?v=${video.id}`);
+                    }).catch(err => {
+                        log("warn", `!p search error: ${err.message}`);
+                        api.sendMessage("Search failed. Try sending a YouTube URL directly.", threadID, ()=>{});
+                    });
+                }
+                return;
+            }
             // ── !vm
             if (cmd==="vm") {
                 const txt=args.slice(1).join(" ");
