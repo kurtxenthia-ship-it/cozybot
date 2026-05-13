@@ -363,9 +363,11 @@ tr:hover td{background:rgba(255,255,255,.015);}
 .adm-sub{font-size:12px;color:var(--gray);}
 
 /* AUTH PAGES */
-.auth-pg{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);background-image:radial-gradient(ellipse at 30% 20%,rgba(220,38,38,.07) 0%,transparent 60%),radial-gradient(ellipse at 70% 80%,rgba(220,38,38,.04) 0%,transparent 60%);}
-.auth-card{width:420px;background:var(--card);border:1px solid var(--border);border-radius:20px;padding:40px;position:relative;overflow:hidden;}
-.auth-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--red),var(--red2),transparent);}
+.auth-pg{width:100%;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;background:#080808;background-image:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(220,38,38,.22) 0%,transparent 60%),radial-gradient(ellipse 60% 40% at 80% 100%,rgba(185,28,28,.14) 0%,transparent 55%),radial-gradient(ellipse 40% 30% at 10% 80%,rgba(220,38,38,.08) 0%,transparent 50%);}
+.auth-pg::before{content:'';position:fixed;inset:0;background:repeating-linear-gradient(0deg,transparent,transparent 39px,rgba(220,38,38,.03) 40px),repeating-linear-gradient(90deg,transparent,transparent 39px,rgba(220,38,38,.03) 40px);pointer-events:none;z-index:0;}
+.auth-card{width:100%;max-width:420px;background:rgba(14,14,14,.95);border:1px solid rgba(220,38,38,.2);border-radius:20px;padding:40px;position:relative;overflow:hidden;z-index:1;box-shadow:0 0 60px rgba(220,38,38,.12),0 24px 80px rgba(0,0,0,.6);backdrop-filter:blur(12px);}
+.auth-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--red),#ff4444,var(--red2),transparent);}
+.auth-card::after{content:'';position:absolute;top:0;left:0;right:0;bottom:0;background:radial-gradient(ellipse at 50% 0%,rgba(220,38,38,.06) 0%,transparent 60%);pointer-events:none;}
 .auth-logo{display:flex;align-items:center;gap:12px;margin-bottom:28px;}
 .auth-li{width:42px;height:42px;background:linear-gradient(135deg,var(--red),var(--red-dim));border-radius:11px;display:flex;align-items:center;justify-content:center;box-shadow:0 4px 20px var(--rg3);}
 .auth-lt{font-size:18px;font-weight:800;letter-spacing:.04em;}
@@ -385,7 +387,7 @@ tr:hover td{background:rgba(255,255,255,.015);}
 .aerr{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);border-radius:8px;padding:10px 14px;font-size:13px;color:#fca5a5;margin-bottom:16px;display:flex;align-items:center;gap:8px;}
 
 @media(max-width:900px){.sg{grid-template-columns:1fr 1fr;}.two-col{grid-template-columns:1fr;}.acg{grid-template-columns:1fr;}}
-@media(max-width:640px){.sb{width:64px;}.sb .sb-brand,.sb .ni .lbl,.sb .lo-lbl,.sb .u-info,.sb .tog-lbl{opacity:0;width:0;}.mw{margin-left:64px;}.sg{grid-template-columns:1fr;}.steps-g{grid-template-columns:1fr;}.auth-card{width:calc(100vw - 32px);padding:28px 20px;}}
+@media(max-width:640px){.sb{width:64px;}.sb .sb-brand,.sb .ni .lbl,.sb .lo-lbl,.sb .u-info,.sb .tog-lbl{opacity:0;width:0;}.mw{margin-left:64px;}.sg{grid-template-columns:1fr;}.steps-g{grid-template-columns:1fr;}.auth-card{padding:28px 20px;}}
 `;
 
 // ─── SVG ICONS ────────────────────────────────────────────────────────────────
@@ -413,7 +415,7 @@ const I = {
 
 // ─── LOGIN PAGE ───────────────────────────────────────────────────────────────
 function buildLoginPage(err) {
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DUMMYL BOT — Login</title><style>${CSS}</style></head><body>
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DUMMYL BOT — Login</title><style>${CSS}body{display:block;}</style></head><body>
 <div class="auth-pg">
 <div class="auth-card">
 <div class="auth-logo">
@@ -436,7 +438,7 @@ ${err?`<div class="aerr"><svg width="15" height="15" fill="none" stroke="current
 
 // ─── REGISTER PAGE ────────────────────────────────────────────────────────────
 function buildRegisterPage(err) {
-    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DUMMYL BOT — Register</title><style>${CSS}</style></head><body>
+    return `<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DUMMYL BOT — Register</title><style>${CSS}body{display:block;}</style></head><body>
 <div class="auth-pg">
 <div class="auth-card">
 <div class="auth-logo">
