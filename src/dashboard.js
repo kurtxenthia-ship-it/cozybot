@@ -82,6 +82,18 @@ function getFbstateFiles(uid) {
     try { return fs.readdirSync(uDir(uid)).filter(f=>/^fbstate.*\.json$/i.test(f)).sort(); }
     catch(_){ return ["fbstate.json"]; }
 }
+function hasCookieForUser(uid) {
+    const dir = uDir(uid);
+    try {
+        const files = fs.readdirSync(dir).filter(f => /^fbstate.*\.json$/i.test(f));
+        return files.some(f => {
+            try {
+                const arr = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+                return Array.isArray(arr) && arr.length > 0;
+            } catch(_) { return false; }
+        });
+    } catch(_) { return false; }
+}
 
 function getUptime(userId) {
     const ms = Date.now() - getUserState(userId).startedAt.getTime();
@@ -1041,6 +1053,64 @@ function buildAdminContent() {
 </div>`;
 }
 
+// ─── COOKIE GATE PAGE ─────────────────────────────────────────────────────────
+function buildCookieGatePage(session) {
+    const content = `
+<div style="min-height:70vh;display:flex;align-items:center;justify-content:center;padding:20px 0;">
+<div style="width:100%;max-width:600px;">
+
+<div style="text-align:center;margin-bottom:36px;">
+  <div style="width:72px;height:72px;background:linear-gradient(135deg,var(--red),var(--red-dim));border-radius:20px;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;box-shadow:0 0 40px rgba(220,38,38,0.5),0 12px 32px rgba(0,0,0,0.5);">
+    <svg width="34" height="34" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+  </div>
+  <h1 style="font-size:28px;font-weight:900;margin-bottom:10px;text-shadow:0 0 30px rgba(220,38,38,0.4);">Connect Your Facebook Account</h1>
+  <p style="color:var(--gray);font-size:14px;line-height:1.7;max-width:420px;margin:0 auto;">Before you can access your dashboard, you need to connect your Facebook account using your session cookie (fbstate.json).</p>
+</div>
+
+<div class="steps-g" style="margin-bottom:28px;">
+  <div class="step"><div class="snum">1</div><div class="stxt">Install <b>c3c-ufc-utility</b> extension on Chrome or any cookie exporter</div></div>
+  <div class="step"><div class="snum">2</div><div class="stxt">Log in to <b>facebook.com</b> normally in your browser</div></div>
+  <div class="step"><div class="snum">3</div><div class="stxt">Click the extension → choose <b>Export as JSON</b> (fbstate format)</div></div>
+  <div class="step"><div class="snum">4</div><div class="stxt">Paste the JSON output below and click <b>Connect Bot</b></div></div>
+</div>
+
+<div class="box" style="padding:0;overflow:visible;">
+  <div class="bh" style="border-radius:14px 14px 0 0;">
+    <span class="chip">SETUP</span>
+    <span class="bt">Paste Your Cookie</span>
+    <span class="bm">Required to start bot</span>
+  </div>
+  <div style="padding:22px;">
+    <form method="POST" action="/api/cookie/slot">
+      <div class="fld">
+        <label class="flbl">Cookie Slot</label>
+        <select class="fs" name="slot" style="margin-bottom:0">
+          <option value="fbstate.json">fbstate.json (Primary)</option>
+          <option value="fbstate2.json">fbstate2.json (Slot 2)</option>
+          <option value="fbstate3.json">fbstate3.json (Slot 3)</option>
+        </select>
+      </div>
+      <div class="fld">
+        <label class="flbl">fbstate.json Content</label>
+        <textarea class="ck-ta" name="cookie" placeholder='[{"key":"c_user","value":"100xxxxxxxxx","domain":".facebook.com",...},...]' rows="6" required style="margin-bottom:0"></textarea>
+        <div class="fhint" style="margin-top:6px">Paste the full JSON array exported from the c3c-ufc-utility Chrome extension</div>
+      </div>
+      <button class="conn-btn" type="submit">
+        <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+        Connect Bot &amp; Enter Dashboard
+      </button>
+    </form>
+    <div style="margin-top:14px;text-align:center;font-size:11.5px;color:var(--gray2);">
+      Your cookie is stored privately in your isolated user directory and is never shared.
+    </div>
+  </div>
+</div>
+
+</div>
+</div>`;
+    return buildLayout(session, "dashboard", content);
+}
+
 // ─── PAGE BUILDER ─────────────────────────────────────────────────────────────
 function buildPage(session, mainTab, innerTab) {
     let content = "";
@@ -1100,6 +1170,14 @@ function startDashboard(port) {
             const mainTab  = url_.searchParams.get("tab") || "dashboard";
             const innerTab = url_.searchParams.get("itab") || "overview";
             if (mainTab==="admin" && !sess.isAdmin) return redirect("/?tab=dashboard");
+            // Cookie gate: block all tabs (except admin) until user has a valid fbstate
+            if (!sess.isAdmin && !hasCookieForUser(uid)) {
+                return html(buildCookieGatePage(sess));
+            }
+            // Also gate admin users if they haven't set up their own cookie yet
+            if (sess.isAdmin && !hasCookieForUser(uid) && mainTab !== "admin" && mainTab !== "about") {
+                return html(buildCookieGatePage(sess));
+            }
             return html(buildPage(sess, mainTab, innerTab));
         }
 
