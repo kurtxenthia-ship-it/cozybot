@@ -22,7 +22,7 @@ function writeUsers(arr) {
 }
 
 function init() {
-    try { fs.mkdirSync(DATA_USERS, { recursive: true }); } catch (_) {}
+    try { fs.mkdirSync(path.join(__dirname, "../data"), { recursive: true }); } catch (_) {}
     const users = readUsers();
     if (!users.find(u => u.email.toLowerCase() === ADMIN_EMAIL.toLowerCase())) {
         users.push({
