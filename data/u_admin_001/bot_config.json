@@ -1,0 +1,23 @@
+{
+  "loopReact": "😆",
+  "loopDelay": 1,
+  "imageProbability": 20,
+  "loopMode": "sequential",
+  "loopStartMsg": "",
+  "loopStopMsg": "",
+  "maxLoopCount": 0,
+  "autoStopMinutes": 0,
+  "ttsLang": "tl",
+  "reactOnlyMode": false,
+  "greetNewMembers": false,
+  "greetMsg": "Welcome to the group! 👋",
+  "antiSpamEnabled": false,
+  "antiSpamMaxMsg": 5,
+  "antiSpamWindowSec": 10,
+  "autoSeenEnabled": false,
+  "typingSimulate": false,
+  "silentMode": false,
+  "loopSilentMode": false,
+  "autoReactEnabled": false,
+  "autoReactEmoji": "😆"
+}

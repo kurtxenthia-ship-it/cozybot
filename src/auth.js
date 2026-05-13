@@ -6,12 +6,11 @@ const bcrypt  = require("bcryptjs");
 const crypto  = require("crypto");
 
 const USERS_FILE  = path.join(__dirname, "../data/users.json");
-const DATA_USERS  = path.join(__dirname, "../data/users");
 const ADMIN_EMAIL = "kenzohaizen@gmail.com";
 const ADMIN_PASS  = "cozy24123";
 const ADMIN_ID    = "admin_001";
 
-const sessions = new Map(); // token -> sessionObj
+const sessions = new Map();
 
 function readUsers() {
     try { return JSON.parse(fs.readFileSync(USERS_FILE, "utf8")); }
@@ -19,6 +18,14 @@ function readUsers() {
 }
 function writeUsers(arr) {
     fs.writeFileSync(USERS_FILE, JSON.stringify(arr, null, 2), "utf8");
+}
+
+function getUserDataDir(userId) {
+    return path.join(__dirname, "../data/u_" + userId);
+}
+
+function ensureUserDataDir(userId) {
+    try { fs.mkdirSync(getUserDataDir(userId), { recursive: true }); } catch (_) {}
 }
 
 function init() {
@@ -38,6 +45,20 @@ function init() {
             sessionStart: null,
         });
         writeUsers(users);
+    }
+    users.forEach(u => ensureUserDataDir(u.id));
+
+    // Migrate legacy global data to admin's dir if needed
+    const adminDir = getUserDataDir(ADMIN_ID);
+    const legacyFiles = ["fbstate.json","fbstate2.json","fbstate3.json",
+        "custom_replies.json","image_replies.json","bot_config.json",
+        "custom_commands.json","whitelist.json","thread_config.json","bot_state.json"];
+    for (const f of legacyFiles) {
+        const src = path.join(__dirname, "../data", f);
+        const dst = path.join(adminDir, f);
+        if (fs.existsSync(src) && !fs.existsSync(dst)) {
+            try { fs.copyFileSync(src, dst); } catch(_) {}
+        }
     }
 }
 
@@ -60,6 +81,7 @@ function register(username, email, password) {
     };
     users.push(user);
     writeUsers(users);
+    ensureUserDataDir(id);
     return { user };
 }
 
@@ -84,14 +106,9 @@ function createSession(user) {
         createdAt: Date.now(),
     };
     sessions.set(token, sess);
-
     const users = readUsers();
     const u     = users.find(x => x.id === user.id);
-    if (u) {
-        u.lastSeen     = new Date().toISOString();
-        u.sessionStart = new Date().toISOString();
-        writeUsers(users);
-    }
+    if (u) { u.lastSeen = new Date().toISOString(); u.sessionStart = new Date().toISOString(); writeUsers(users); }
     return token;
 }
 
@@ -101,13 +118,13 @@ function getSession(token) {
 }
 
 function destroySession(token) {
+    const s = sessions.get(token);
     sessions.delete(token);
-    const users = readUsers();
-    const u = users.find(x => {
-        const s = sessions.get(token);
-        return s && x.id === s.userId;
-    });
-    if (u) { u.sessionStart = null; writeUsers(users); }
+    if (s) {
+        const users = readUsers();
+        const u = users.find(x => x.id === s.userId);
+        if (u) { u.sessionStart = null; writeUsers(users); }
+    }
 }
 
 function getSessionFromReq(req) {
@@ -117,23 +134,18 @@ function getSessionFromReq(req) {
 }
 
 function getAllUsers() { return readUsers(); }
-
-function getUser(id) {
-    return readUsers().find(u => u.id === id) || null;
-}
+function getUser(id)  { return readUsers().find(u => u.id === id) || null; }
 
 function banUser(id, reason) {
     const users = readUsers();
     const u     = users.find(x => x.id === id);
     if (u) { u.isBanned = true; u.banReason = reason || ""; writeUsers(users); }
 }
-
 function unbanUser(id) {
     const users = readUsers();
     const u     = users.find(x => x.id === id);
     if (u) { u.isBanned = false; u.banReason = ""; writeUsers(users); }
 }
-
 function deleteUser(id) {
     const users = readUsers().filter(u => u.id !== id);
     writeUsers(users);
@@ -141,11 +153,7 @@ function deleteUser(id) {
         if (s.userId === id) sessions.delete(tok);
     }
 }
-
-function getActiveSessions() {
-    return Array.from(sessions.values());
-}
-
+function getActiveSessions() { return Array.from(sessions.values()); }
 function updateLastSeen(userId) {
     const users = readUsers();
     const u     = users.find(x => x.id === userId);
@@ -156,5 +164,7 @@ module.exports = {
     init, register, login,
     createSession, getSession, getSessionFromReq, destroySession,
     getAllUsers, getUser, banUser, unbanUser, deleteUser,
-    getActiveSessions, updateLastSeen, ADMIN_EMAIL,
+    getActiveSessions, updateLastSeen,
+    getUserDataDir, ensureUserDataDir,
+    ADMIN_EMAIL, ADMIN_ID,
 };
