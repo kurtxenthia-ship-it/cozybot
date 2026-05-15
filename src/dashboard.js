@@ -9,6 +9,8 @@ const { replies } = require("./replies");
 const MAX_LOGS = 200;
 const userStates   = new Map();
 const accountInfos = new Map();
+const pendingCookies = new Map(); // server-side store: token -> {cookie, botName, createdAt}
+setInterval(()=>{const cutoff=Date.now()-10*60*1000;for(const[k,v]of pendingCookies)if(v.createdAt<cutoff)pendingCookies.delete(k);},60000);
 
 function getUserState(userId) {
     if (!userStates.has(userId)) {
@@ -955,105 +957,271 @@ ${sections.map(s=>`
 // ─── TEMP MAIL ────────────────────────────────────────────────────────────────
 function buildTempMailContent(uid) {
     return `
+<style>
+.tm-grid{display:grid;grid-template-columns:380px 1fr;gap:18px;align-items:start;}
+@media(max-width:900px){.tm-grid{grid-template-columns:1fr;}}
+.tm-addr-wrap{position:relative;background:rgba(220,38,38,0.06);border:1px solid rgba(220,38,38,0.22);border-radius:12px;padding:16px 18px;margin:14px 0;}
+.tm-addr{font-family:'Courier New',monospace;font-size:16px;font-weight:700;color:var(--red3);letter-spacing:.04em;word-break:break-all;line-height:1.4;}
+.tm-addr-ph{font-size:13px;color:var(--gray2);font-style:italic;}
+.tm-copy-btn{position:absolute;top:12px;right:12px;background:rgba(220,38,38,0.14);border:1px solid rgba(220,38,38,0.28);color:var(--red2);border-radius:8px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;align-items:center;gap:5px;}
+.tm-copy-btn:hover{background:rgba(220,38,38,0.25);box-shadow:0 0 12px rgba(220,38,38,0.3);}
+.tm-copy-btn.ok{color:#22c55e;border-color:rgba(34,197,94,.3);background:rgba(34,197,94,.08);}
+.tm-gen-btn{width:100%;padding:12px;background:linear-gradient(135deg,var(--red),var(--red-dim));border:none;color:#fff;border-radius:11px;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .22s;box-shadow:0 4px 22px rgba(220,38,38,0.3);display:flex;align-items:center;justify-content:center;gap:8px;}
+.tm-gen-btn:hover{box-shadow:0 4px 36px rgba(220,38,38,0.55);transform:translateY(-1px);}
+.tm-gen-btn:disabled{opacity:.55;cursor:not-allowed;transform:none;}
+.tm-stat-row{display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap;}
+.tm-stat{font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600;}
+.tm-stat-ok{background:rgba(34,197,94,.1);color:#22c55e;border:1px solid rgba(34,197,94,.22);}
+.tm-stat-warn{background:rgba(245,158,11,.1);color:#f59e0b;border:1px solid rgba(245,158,11,.22);}
+.tm-stat-err{background:rgba(239,68,68,.1);color:#ef4444;border:1px solid rgba(239,68,68,.22);}
+.tm-stat-gray{background:rgba(139,119,176,.08);color:var(--gray);border:1px solid var(--border);}
+.tm-panel-head{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;border-bottom:1px solid var(--border);}
+.tm-panel-title{font-size:13px;font-weight:700;color:var(--white);}
+.tm-refresh-btn{background:none;border:1px solid var(--border2);color:var(--gray);border-radius:8px;padding:5px 11px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .2s;display:flex;align-items:center;gap:6px;}
+.tm-refresh-btn:hover{border-color:var(--red2);color:var(--red3);box-shadow:0 0 10px rgba(220,38,38,0.2);}
+.tm-refresh-btn:disabled{opacity:.45;cursor:not-allowed;}
+.tm-inbox{max-height:420px;overflow-y:auto;}
+.tm-inbox-item{padding:13px 18px;border-bottom:1px solid rgba(220,38,38,0.05);cursor:pointer;transition:background .15s;position:relative;}
+.tm-inbox-item:hover{background:rgba(220,38,38,0.04);}
+.tm-inbox-item.unread::before{content:'';position:absolute;left:6px;top:50%;transform:translateY(-50%);width:5px;height:5px;border-radius:50%;background:var(--red2);box-shadow:0 0 6px var(--red);}
+.tm-inbox-from{font-size:12px;font-weight:700;color:var(--off);margin-bottom:2px;}
+.tm-inbox-subj{font-size:13px;color:var(--white);font-weight:500;margin-bottom:3px;}
+.tm-inbox-date{font-size:10.5px;color:var(--gray2);}
+.tm-inbox-empty{padding:40px 20px;text-align:center;color:var(--gray2);}
+.tm-inbox-empty-ico{font-size:32px;margin-bottom:10px;opacity:.4;}
+.tm-inbox-empty-txt{font-size:12.5px;}
+.tm-inbox-empty-sub{font-size:11px;color:var(--gray2);margin-top:4px;opacity:.7;}
+.tm-msg-view{background:var(--card);border:1px solid var(--border);border-radius:14px;margin-top:18px;overflow:hidden;animation:fadeUp .25s ease;}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:translateY(0);}}
+.tm-msg-head{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;background:rgba(220,38,38,0.04);}
+.tm-msg-subj{font-size:13.5px;font-weight:700;color:var(--white);flex:1;}
+.tm-msg-close{background:none;border:1px solid var(--border2);color:var(--gray);border-radius:8px;padding:5px 11px;font-size:11px;cursor:pointer;font-family:inherit;transition:all .2s;}
+.tm-msg-close:hover{border-color:var(--red2);color:var(--red3);}
+.tm-msg-from{font-size:11px;color:var(--gray);padding:10px 20px;border-bottom:1px solid var(--border);background:rgba(0,0,0,0.2);}
+.tm-msg-body{padding:18px 20px;font-size:12.5px;color:var(--off);white-space:pre-wrap;line-height:1.7;max-height:340px;overflow-y:auto;font-family:'Courier New',monospace;}
+.tm-auto-row{display:flex;align-items:center;gap:8px;padding:10px 18px;border-top:1px solid var(--border);background:rgba(0,0,0,0.15);}
+.tm-countdown{font-size:11px;color:var(--gray2);margin-left:auto;}
+.tm-spin{display:inline-block;width:13px;height:13px;border:2px solid rgba(220,38,38,0.2);border-top:2px solid var(--red);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:4px;}
+</style>
+
 <div class="hero">
   <div class="hero-in">
     <div class="hero-l">
       <div class="hero-ic">${I.mail}</div>
       <div>
-        <div class="hero-title">Temp Mail <span class="hero-ver">LIVE</span></div>
-        <div class="hero-desc">Generate disposable email addresses. Inbox refreshes automatically.</div>
+        <div class="hero-title">Temp Mail <span class="hero-ver">BUILT-IN</span></div>
+        <div class="hero-desc">Disposable email addresses powered by our own API endpoint. No sign-up, no tracking.</div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <div class="pill p-on"><i></i> API Active</div>
+      <div class="pill p-warn"><i></i> Ephemeral</div>
+    </div>
+  </div>
+</div>
+
+<div class="tm-grid">
+  <!-- Left: Generate -->
+  <div>
+    <div class="box">
+      <div class="bh"><span class="chip chip-g">GENERATE</span><span class="bt">New Temp Email</span></div>
+      <div style="padding:18px 20px">
+        <div style="font-size:11.5px;color:var(--gray);margin-bottom:12px;line-height:1.6;">Click generate to create a fresh disposable address. Emails arrive in seconds.</div>
+        <div class="tm-addr-wrap">
+          <div id="tmAddr" class="tm-addr-ph">No address yet</div>
+          <button class="tm-copy-btn" id="tmCopyBtn" onclick="copyTmEmail()" style="display:none">
+            <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            Copy
+          </button>
+        </div>
+        <button class="tm-gen-btn" id="tmGenBtn" onclick="generateTmEmail()">
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+          Generate Email
+        </button>
+        <div class="tm-stat-row" id="tmStatRow" style="display:none!important"></div>
+      </div>
+    </div>
+
+    <div class="box" style="margin-top:0">
+      <div class="bh"><span class="chip">INFO</span><span class="bt">How It Works</span></div>
+      <div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px">
+        ${[
+          ["1","Generate","Click Generate to get a fresh @mail.tm address."],
+          ["2","Use It","Paste your temp email anywhere you need to register."],
+          ["3","Receive","Emails appear in your inbox within seconds."],
+          ["4","Read","Click any email to read its full content."],
+        ].map(([n,t,d])=>`
+        <div style="display:flex;gap:12px;align-items:flex-start">
+          <div style="width:22px;height:22px;border-radius:6px;background:rgba(220,38,38,0.15);border:1px solid rgba(220,38,38,0.28);color:var(--red2);font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;flex-shrink:0">${n}</div>
+          <div><div style="font-size:12px;font-weight:700;color:var(--off)">${t}</div><div style="font-size:11px;color:var(--gray);margin-top:2px">${d}</div></div>
+        </div>`).join("")}
       </div>
     </div>
   </div>
-</div>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
-  <div class="box" style="padding:20px">
-    <div class="bt" style="margin-bottom:12px">Your Temp Email</div>
-    <div class="mail-addr" id="mailAddr">Generating...</div>
-    <div style="font-size:11px;color:var(--gray);margin-top:6px" id="mailToken"></div>
-    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
-      <button class="btn btn-r btn-sm" onclick="generateEmail()">Generate New Email</button>
-      <button class="btn btn-o btn-sm" onclick="copyEmail()">${I.upload} Copy</button>
+
+  <!-- Right: Inbox -->
+  <div class="box" style="overflow:hidden">
+    <div class="tm-panel-head">
+      <span class="tm-panel-title">${I.mail} Inbox</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span id="tmInboxCount" class="tm-stat tm-stat-gray">0 messages</span>
+        <button class="tm-refresh-btn" id="tmRefreshBtn" onclick="refreshTmInbox()">
+          ${I.refresh} Refresh
+        </button>
+      </div>
     </div>
-  </div>
-  <div class="box" style="padding:20px">
-    <div class="bt" style="margin-bottom:8px">Inbox</div>
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
-      <button class="btn btn-o btn-sm" onclick="refreshInbox()" id="refreshBtn">${I.refresh} Refresh</button>
-      <span style="font-size:11px;color:var(--gray)" id="inboxStatus">—</span>
-      <label class="tr-row" style="margin-left:auto;padding:0;gap:7px">
-        <input type="checkbox" class="tck" id="autoRefCheck" onchange="toggleAutoRef()">
+    <div class="tm-inbox" id="tmInboxList">
+      <div class="tm-inbox-empty">
+        <div class="tm-inbox-empty-ico">📭</div>
+        <div class="tm-inbox-empty-txt">No inbox yet</div>
+        <div class="tm-inbox-empty-sub">Generate an email address first</div>
+      </div>
+    </div>
+    <div class="tm-auto-row">
+      <label class="tr-row" style="padding:0;gap:7px;margin:0">
+        <input type="checkbox" class="tck" id="tmAutoRef" onchange="toggleTmAutoRef()">
         <span class="ttr"><span class="tth"></span></span>
-        <span style="font-size:11px;color:var(--gray)">Auto-refresh (10s)</span>
+        <span style="font-size:11.5px;color:var(--gray)">Auto-refresh</span>
       </label>
-    </div>
-    <div id="inboxList" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:10px">
-      <div style="padding:26px;text-align:center;color:var(--gray2);font-size:12px">Generate an email first, then your inbox will appear here.</div>
+      <span style="font-size:11px;color:var(--gray2)">every 10s</span>
+      <span class="tm-countdown" id="tmCountdown" style="display:none"></span>
     </div>
   </div>
 </div>
-<div class="box" id="msgView" style="display:none">
-  <div class="bh" style="cursor:pointer" onclick="document.getElementById('msgView').style.display='none'">
-    <span class="chip chip-b">MESSAGE</span><span class="bt" id="msgSubject">—</span>
-    <span class="bm" style="color:var(--red2)">Click to close</span>
+
+<div id="tmMsgView" style="display:none" class="tm-msg-view">
+  <div class="tm-msg-head">
+    <span class="chip chip-b">MESSAGE</span>
+    <span class="tm-msg-subj" id="tmMsgSubject">—</span>
+    <button class="tm-msg-close" onclick="closeTmMsg()">✕ Close</button>
   </div>
-  <div class="inbox-body" id="msgBody"></div>
+  <div class="tm-msg-from" id="tmMsgFrom"></div>
+  <div class="tm-msg-body" id="tmMsgBody">Loading...</div>
 </div>
+
 <script>
-var mailToken=null,mailAddr=null,autoRefTimer=null;
-function generateEmail(){
-  document.getElementById('mailAddr').textContent='Generating...';
-  document.getElementById('mailToken').textContent='';
+var _tmToken=null,_tmAddr=null,_tmAutoTimer=null,_tmCountTimer=null,_tmCountVal=10;
+
+function escH(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+function setTmStatus(text,cls){
+  var r=document.getElementById('tmStatRow');
+  if(!text){r.style.setProperty('display','none','important');return;}
+  r.style.removeProperty('display');
+  r.innerHTML='<span class="tm-stat '+cls+'">'+escH(text)+'</span>';
+}
+
+function generateTmEmail(){
+  var btn=document.getElementById('tmGenBtn');
+  btn.disabled=true;
+  btn.innerHTML='<span class="tm-spin"></span> Generating...';
+  document.getElementById('tmAddr').className='tm-addr-ph';
+  document.getElementById('tmAddr').textContent='Generating address...';
+  document.getElementById('tmCopyBtn').style.display='none';
+  setTmStatus('Connecting to mail server...','tm-stat-warn');
+  closeTmMsg();
+
   fetch('/api/tempmail/generate',{method:'POST'}).then(r=>r.json()).then(d=>{
-    if(d.error){document.getElementById('mailAddr').textContent='Error: '+d.error;return;}
-    mailAddr=d.address;mailToken=d.token;
-    document.getElementById('mailAddr').textContent=d.address;
-    document.getElementById('mailToken').textContent='Token: '+d.token.slice(0,20)+'...';
-    document.getElementById('inboxStatus').textContent='Inbox ready';
-    refreshInbox();
-  }).catch(()=>{document.getElementById('mailAddr').textContent='Failed to generate';});
+    btn.disabled=false;
+    btn.innerHTML='<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg> Regenerate';
+    if(d.error){
+      document.getElementById('tmAddr').textContent='Failed: '+d.error;
+      setTmStatus('Error: '+d.error,'tm-stat-err');
+      return;
+    }
+    _tmAddr=d.address;_tmToken=d.token;
+    var el=document.getElementById('tmAddr');
+    el.className='tm-addr';
+    el.textContent=d.address;
+    document.getElementById('tmCopyBtn').style.display='flex';
+    setTmStatus('Active — ready to receive mail','tm-stat-ok');
+    refreshTmInbox();
+  }).catch(e=>{
+    btn.disabled=false;
+    btn.innerHTML='<svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg> Generate Email';
+    setTmStatus('Network error','tm-stat-err');
+  });
 }
-function copyEmail(){
-  if(mailAddr)navigator.clipboard&&navigator.clipboard.writeText(mailAddr).then(()=>{document.getElementById('inboxStatus').textContent='Copied!';setTimeout(()=>{document.getElementById('inboxStatus').textContent='';},2000);});
+
+function copyTmEmail(){
+  if(!_tmAddr)return;
+  navigator.clipboard&&navigator.clipboard.writeText(_tmAddr).then(()=>{
+    var btn=document.getElementById('tmCopyBtn');
+    btn.classList.add('ok');
+    btn.innerHTML='<svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg> Copied!';
+    setTimeout(()=>{btn.classList.remove('ok');btn.innerHTML='<svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg> Copy';},2000);
+  });
 }
-function refreshInbox(){
-  if(!mailToken){document.getElementById('inboxStatus').textContent='No email generated yet';return;}
-  var btn=document.getElementById('refreshBtn');
-  if(btn)btn.style.opacity='.5';
-  document.getElementById('inboxStatus').textContent='Refreshing...';
-  fetch('/api/tempmail/inbox?token='+encodeURIComponent(mailToken)).then(r=>r.json()).then(d=>{
-    if(btn)btn.style.opacity='1';
-    if(d.error){document.getElementById('inboxStatus').textContent='Error: '+d.error;return;}
+
+function refreshTmInbox(){
+  if(!_tmToken){setTmStatus('Generate an email first','tm-stat-warn');return;}
+  var btn=document.getElementById('tmRefreshBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="tm-spin"></span> Refreshing...';}
+  fetch('/api/tempmail/inbox?token='+encodeURIComponent(_tmToken)).then(r=>r.json()).then(d=>{
+    if(btn){btn.disabled=false;btn.innerHTML='${I.refresh.replace(/'/g,"\\'")} Refresh';}
+    var el=document.getElementById('tmInboxList');
+    var cnt=document.getElementById('tmInboxCount');
+    if(d.error){
+      cnt.className='tm-stat tm-stat-err';cnt.textContent='Error';
+      el.innerHTML='<div class="tm-inbox-empty"><div class="tm-inbox-empty-txt" style="color:#ef4444">'+escH(d.error)+'</div></div>';
+      return;
+    }
     var msgs=d.messages||[];
-    document.getElementById('inboxStatus').textContent=msgs.length+' message'+(msgs.length!==1?'s':'');
-    var el=document.getElementById('inboxList');
-    if(!msgs.length){el.innerHTML='<div style="padding:26px;text-align:center;color:var(--gray2);font-size:12px">Inbox is empty. Waiting for emails...</div>';return;}
-    el.innerHTML=msgs.map(function(m){
+    cnt.className='tm-stat '+(msgs.length?'tm-stat-ok':'tm-stat-gray');
+    cnt.textContent=msgs.length+' message'+(msgs.length!==1?'s':'');
+    if(!msgs.length){
+      el.innerHTML='<div class="tm-inbox-empty"><div class="tm-inbox-empty-ico">📭</div><div class="tm-inbox-empty-txt">Inbox empty</div><div class="tm-inbox-empty-sub">Waiting for incoming mail...</div></div>';
+      return;
+    }
+    el.innerHTML=msgs.map(function(m,i){
       var id=JSON.stringify(m.id);
       var subj=JSON.stringify(m.subject||'(no subject)');
-      return '<div class="inbox-item" onclick="viewMsg('+id+','+subj+')">'
-        +'<div class="inbox-from">'+escHtml(m.from||'Unknown')+'</div>'
-        +'<div class="inbox-subj">'+escHtml(m.subject||'(no subject)')+'</div>'
-        +'<div class="inbox-date">'+escHtml(m.date||'')+'</div>'
+      var from=JSON.stringify(m.from||'Unknown');
+      return '<div class="tm-inbox-item unread" onclick="viewTmMsg('+id+','+subj+','+from+')">'
+        +'<div class="tm-inbox-from">'+escH(m.from||'Unknown')+'</div>'
+        +'<div class="tm-inbox-subj">'+escH(m.subject||'(no subject)')+'</div>'
+        +'<div class="tm-inbox-date">'+escH(m.date||'')+'</div>'
         +'</div>';
     }).join('');
-  }).catch(()=>{if(btn)btn.style.opacity='1';document.getElementById('inboxStatus').textContent='Refresh failed';});
+  }).catch(()=>{
+    if(btn){btn.disabled=false;btn.innerHTML='${I.refresh.replace(/'/g,"\\'")} Refresh';}
+    document.getElementById('tmInboxCount').className='tm-stat tm-stat-err';
+    document.getElementById('tmInboxCount').textContent='Failed';
+  });
 }
-function viewMsg(id,subject){
-  document.getElementById('msgSubject').textContent=subject;
-  document.getElementById('msgBody').textContent='Loading...';
-  document.getElementById('msgView').style.display='';
-  fetch('/api/tempmail/message?token='+encodeURIComponent(mailToken)+'&id='+encodeURIComponent(id)).then(r=>r.json()).then(d=>{
-    document.getElementById('msgBody').textContent=d.body||d.text||'(empty)';
-  }).catch(()=>{document.getElementById('msgBody').textContent='Failed to load message.';});
+
+function viewTmMsg(id,subject,from){
+  document.getElementById('tmMsgView').style.display='';
+  document.getElementById('tmMsgSubject').textContent=subject;
+  document.getElementById('tmMsgFrom').textContent='From: '+from;
+  document.getElementById('tmMsgBody').textContent='Loading message...';
+  document.getElementById('tmMsgView').scrollIntoView({behavior:'smooth',block:'start'});
+  fetch('/api/tempmail/message?token='+encodeURIComponent(_tmToken)+'&id='+encodeURIComponent(id)).then(r=>r.json()).then(d=>{
+    document.getElementById('tmMsgBody').textContent=d.body||d.text||'(empty message)';
+  }).catch(()=>{document.getElementById('tmMsgBody').textContent='Failed to load message.';});
 }
-function toggleAutoRef(){
-  var chk=document.getElementById('autoRefCheck');
-  if(chk.checked){autoRefTimer=setInterval(refreshInbox,10000);}
-  else{clearInterval(autoRefTimer);autoRefTimer=null;}
+
+function closeTmMsg(){
+  document.getElementById('tmMsgView').style.display='none';
 }
-function escHtml(str){return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-generateEmail();
+
+function toggleTmAutoRef(){
+  var chk=document.getElementById('tmAutoRef');
+  var cd=document.getElementById('tmCountdown');
+  if(chk.checked){
+    _tmCountVal=10;
+    cd.style.display='';
+    cd.textContent='Next in '+_tmCountVal+'s';
+    _tmAutoTimer=setInterval(function(){
+      _tmCountVal--;
+      if(_tmCountVal<=0){_tmCountVal=10;refreshTmInbox();}
+      cd.textContent='Next in '+_tmCountVal+'s';
+    },1000);
+  } else {
+    clearInterval(_tmAutoTimer);_tmAutoTimer=null;
+    cd.style.display='none';
+  }
+}
 </script>`;
 }
 
@@ -1327,7 +1495,7 @@ function startDashboard(port) {
         }
         if (path_==="/register"&&!sess) return redirect("/");
 
-        // Step 1: verify cookie, extract bot name, store pending
+        // Step 1: verify cookie, extract bot name, store pending server-side (no size limit)
         if (path_==="/api/entry/cookie"&&req.method==="POST") {
             const body = await parseBody(req);
             const raw = body.cookie||"";
@@ -1338,13 +1506,11 @@ function startDashboard(port) {
             const cUser = parsed.find(c=>c.key==="c_user");
             const fbUid = cUser ? cUser.value : "";
             const botName = fbUid ? `FB_${fbUid}` : "FB_User";
-            // store cookie temporarily in a pending cookie (base64 encoded, limited to 4KB)
-            const pendingPayload = JSON.stringify({cookie: raw, botName});
-            const pending = Buffer.from(pendingPayload).toString("base64");
-            // If cookie is too large for a cookie, truncate gracefully
-            if (pending.length > 3900) return html(buildCookieEntryPage("Cookie data too large. Please use a shorter fbstate.json.","","cookie"));
+            // Store server-side — no size limit
+            const pendingToken = require("crypto").randomBytes(24).toString("hex");
+            pendingCookies.set(pendingToken, { cookie: raw, botName, createdAt: Date.now() });
             res.writeHead(302,{
-                "Set-Cookie":`dbl_pending=${encodeURIComponent(pending)}; Path=/; HttpOnly; SameSite=Lax`,
+                "Set-Cookie":`dbl_pending=${pendingToken}; Path=/; HttpOnly; SameSite=Lax`,
                 "Location":"/entry/key",
             });
             return res.end();
@@ -1352,10 +1518,9 @@ function startDashboard(port) {
 
         // Redirect to key step
         if (path_==="/entry/key") {
-            const pendingRaw = (req.headers.cookie||"").match(/dbl_pending=([^;]+)/)?.[1];
-            if (!pendingRaw) return redirect("/");
-            let pending;
-            try { pending = JSON.parse(Buffer.from(decodeURIComponent(pendingRaw),"base64").toString()); } catch(_) { return redirect("/"); }
+            const pendingToken = (req.headers.cookie||"").match(/(?:^|;\s*)dbl_pending=([^;]+)/)?.[1];
+            const pending = pendingToken ? pendingCookies.get(pendingToken) : null;
+            if (!pending) return redirect("/");
             return html(buildCookieEntryPage("", pending.botName, "key"));
         }
 
@@ -1364,11 +1529,8 @@ function startDashboard(port) {
             const body = await parseBody(req);
             const key = (body.licenseKey||"").trim();
             const botNameFromForm = (body.botName||"").trim();
-            const pendingRaw = (req.headers.cookie||"").match(/dbl_pending=([^;]+)/)?.[1];
-            let cookieData = null;
-            if (pendingRaw) {
-                try { cookieData = JSON.parse(Buffer.from(decodeURIComponent(pendingRaw),"base64").toString()); } catch(_) {}
-            }
+            const pendingToken = (req.headers.cookie||"").match(/(?:^|;\s*)dbl_pending=([^;]+)/)?.[1];
+            const cookieData = pendingToken ? pendingCookies.get(pendingToken) : null;
             const validation = auth.validateKey(key);
             if (validation.error) {
                 return html(buildCookieEntryPage(validation.error, botNameFromForm, "key"));
@@ -1386,6 +1548,7 @@ function startDashboard(port) {
                 try { fs.writeFileSync(dest, cookieData.cookie, "utf8"); } catch(_) {}
                 if (_cookieUpdateCb) _cookieUpdateCb(userId);
             }
+            if (pendingToken) pendingCookies.delete(pendingToken);
             auth.updateUserInfo(userId, { ip: clientIP, userAgent });
             const token = auth.createSession(userId, clientIP, userAgent);
             if (!token) return html(buildCookieEntryPage("Session error — please try again.","","cookie"));
