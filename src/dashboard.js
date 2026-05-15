@@ -6,8 +6,7 @@ const path = require("path");
 const auth = require("./auth");
 const { replies } = require("./replies");
 
-const MAX_LOGS  = 200;
-
+const MAX_LOGS = 200;
 const userStates   = new Map();
 const accountInfos = new Map();
 
@@ -65,6 +64,13 @@ function getUptime(userId){ const ms=Date.now()-getUserState(userId).startedAt.g
 function getHourlyStats(userId){ const now=Date.now();const buckets=new Array(24).fill(0);for(const ts of (getUserState(userId).msgTimestamps||[])){const h=Math.floor((now-ts)/3600000);if(h<24)buckets[23-h]++;}return buckets; }
 function esc(str){ return String(str).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
 
+function getClientIP(req) {
+    return (req.headers["x-forwarded-for"]||"").split(",")[0].trim() ||
+           req.headers["x-real-ip"] ||
+           req.socket?.remoteAddress ||
+           "unknown";
+}
+
 function parseBody(req) {
     return new Promise(resolve=>{
         let raw="";
@@ -115,12 +121,6 @@ const COSMOS_JS = `
     var n1=cx.createRadialGradient(cv.width*0.12,cv.height*0.22,0,cv.width*0.12,cv.height*0.22,cv.width*0.38);
     n1.addColorStop(0,'rgba(140,0,40,0.11)');n1.addColorStop(0.5,'rgba(90,0,70,0.05)');n1.addColorStop(1,'transparent');
     cx.fillStyle=n1;cx.fillRect(0,0,cv.width,cv.height);
-    var n2=cx.createRadialGradient(cv.width*0.88,cv.height*0.7,0,cv.width*0.88,cv.height*0.7,cv.width*0.32);
-    n2.addColorStop(0,'rgba(70,0,90,0.09)');n2.addColorStop(1,'transparent');
-    cx.fillStyle=n2;cx.fillRect(0,0,cv.width,cv.height);
-    var n3=cx.createRadialGradient(cv.width*0.55,cv.height*0.08,0,cv.width*0.55,cv.height*0.08,cv.width*0.22);
-    n3.addColorStop(0,'rgba(110,0,35,0.07)');n3.addColorStop(1,'transparent');
-    cx.fillStyle=n3;cx.fillRect(0,0,cv.width,cv.height);
     stars.forEach(function(s){
       var tw=Math.sin(t*s.sp+s.x*18+s.y*14)*0.22+s.o;
       cx.beginPath();cx.arc(s.x*cv.width,s.y*cv.height,s.r,0,Math.PI*2);
@@ -318,6 +318,8 @@ tr:hover td{background:rgba(220,38,38,0.04);}
 .btn-xs{padding:4px 9px;font-size:10.5px;}
 .btn-danger{background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.28);color:#ef4444;}
 .btn-danger:hover{background:rgba(239,68,68,0.2);box-shadow:0 0 14px rgba(239,68,68,0.32);}
+.btn-green{background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.28);color:#22c55e;}
+.btn-green:hover{background:rgba(34,197,94,0.22);box-shadow:0 0 14px rgba(34,197,94,0.28);}
 .add-row{display:flex;align-items:center;gap:10px;padding:13px 16px;border-bottom:1px solid var(--border);}
 .ai{flex:1;background:rgba(5,2,15,0.6);border:1px solid var(--border2);border-radius:10px;padding:8px 13px;color:var(--white);font-size:12.5px;font-family:inherit;outline:none;transition:all .2s;}
 .ai:focus{border-color:var(--red);box-shadow:0 0 0 2px rgba(220,38,38,0.1);}
@@ -362,7 +364,7 @@ details.box[open]>summary{border-bottom:1px solid var(--border);}
 .adm-ic{width:46px;height:46px;background:linear-gradient(135deg,var(--red),var(--red-dim));border-radius:12px;display:flex;align-items:center;justify-content:center;box-shadow:var(--glow-sm);}
 .adm-title{font-size:18px;font-weight:800;color:var(--white);}
 .adm-sub{font-size:12px;color:var(--gray);margin-top:3px;}
-.pass-cell{font-family:'Courier New',monospace;font-size:11px;color:var(--red3);background:rgba(220,38,38,0.08);border:1px solid rgba(220,38,38,0.15);padding:2px 7px;border-radius:5px;cursor:pointer;user-select:all;}
+.key-cell{font-family:'Courier New',monospace;font-size:11px;color:var(--ok);background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);padding:2px 7px;border-radius:5px;cursor:pointer;user-select:all;letter-spacing:.06em;}
 
 .steps-g{display:flex;flex-direction:column;gap:8px;}
 .step{display:flex;align-items:flex-start;gap:14px;padding:12px 16px;background:var(--rg);border:1px solid var(--border);border-radius:10px;}
@@ -372,6 +374,24 @@ details.box[open]>summary{border-bottom:1px solid var(--border);}
 .conn-btn:hover{box-shadow:0 4px 36px rgba(220,38,38,0.6);transform:translateY(-1px);}
 .ck-ta{width:100%;background:rgba(5,2,15,0.7);border:1px solid var(--border2);border-radius:10px;padding:10px 13px;color:var(--white);font-size:12px;font-family:'Courier New',monospace;outline:none;resize:vertical;transition:border-color .2s;min-height:90px;}
 .ck-ta:focus{border-color:var(--red);box-shadow:0 0 0 3px rgba(220,38,38,0.1);}
+
+/* Loading overlay */
+.loading-overlay{position:fixed;inset:0;background:rgba(3,0,8,0.92);z-index:9999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;backdrop-filter:blur(12px);}
+.loading-overlay.hide{opacity:0;pointer-events:none;transition:opacity .4s;}
+.spin{width:48px;height:48px;border:3px solid rgba(220,38,38,0.2);border-top:3px solid var(--red);border-radius:50%;animation:spin .8s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.loading-msg{font-size:14px;font-weight:600;color:var(--white);}
+.loading-sub{font-size:12px;color:var(--gray);}
+
+/* Temp mail */
+.mail-card{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:18px 20px;margin-bottom:12px;}
+.mail-addr{font-family:'Courier New',monospace;font-size:15px;font-weight:700;color:var(--red3);letter-spacing:.04em;word-break:break-all;}
+.inbox-item{padding:12px 18px;border-bottom:1px solid rgba(220,38,38,0.06);display:flex;flex-direction:column;gap:4px;cursor:pointer;transition:background .15s;}
+.inbox-item:hover{background:rgba(220,38,38,0.04);}
+.inbox-from{font-size:12px;font-weight:600;color:var(--off);}
+.inbox-subj{font-size:12.5px;color:var(--white);}
+.inbox-date{font-size:10.5px;color:var(--gray2);}
+.inbox-body{font-size:12px;color:var(--gray);white-space:pre-wrap;padding:14px 18px;background:rgba(5,2,14,0.6);border-top:1px solid var(--border);}
 `;
 
 // ─── SVG ICONS ────────────────────────────────────────────────────────────────
@@ -391,42 +411,55 @@ const I = {
     clock:   `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
     image:   `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`,
     upload:  `<svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="16 16 12 12 8 16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/></svg>`,
+    mail:    `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>`,
+    key:     `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>`,
+    fb:      `<svg width="18" height="18" viewBox="0 0 24 24" fill="#1877f2"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>`,
+    refresh: `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`,
 };
 
-// ─── LOGIN PAGE ────────────────────────────────────────────────────────────────
-function buildLoginPage(error="") {
+// ─── COOKIE ENTRY PAGE ────────────────────────────────────────────────────────
+function buildCookieEntryPage(error="", successName="", step="cookie") {
+    const isCookieStep = step !== "key";
     return `<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DUMMYL BOT — Sign In</title>
+<title>DUMMYL BOT — ${isCookieStep?"Connect Account":"License Key"}</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{height:100%;font-family:'Inter',system-ui,sans-serif;}
 body{background:#030008;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;}
 #cosmos{position:fixed;inset:0;z-index:0;pointer-events:none;}
-.wrap{position:relative;z-index:1;width:100%;max-width:440px;padding:20px;}
-.card{background:rgba(8,4,20,0.78);backdrop-filter:blur(32px);-webkit-backdrop-filter:blur(32px);border:1px solid rgba(220,38,38,0.18);border-radius:24px;padding:44px 40px;position:relative;overflow:hidden;box-shadow:0 0 70px rgba(220,38,38,0.07),0 24px 90px rgba(0,0,0,0.8);animation:cardIn .65s cubic-bezier(0.2,0,0,1);}
-@keyframes cardIn{from{opacity:0;transform:translateY(28px) scale(0.96);}to{opacity:1;transform:translateY(0) scale(1);}}
+.wrap{position:relative;z-index:1;width:100%;max-width:480px;padding:20px;}
+.card{background:rgba(8,4,20,0.82);backdrop-filter:blur(32px);-webkit-backdrop-filter:blur(32px);border:1px solid rgba(220,38,38,0.18);border-radius:24px;padding:40px 38px;position:relative;overflow:hidden;box-shadow:0 0 70px rgba(220,38,38,0.08),0 24px 90px rgba(0,0,0,0.85);animation:cardIn .55s cubic-bezier(0.2,0,0,1);}
+@keyframes cardIn{from{opacity:0;transform:translateY(22px) scale(0.97);}to{opacity:1;transform:translateY(0) scale(1);}}
 .card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#dc2626,#ef4444,#dc2626,transparent);background-size:200% 100%;animation:borderFlow 4s linear infinite;}
-.card::after{content:'';position:absolute;top:-60px;right:-60px;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,rgba(220,38,38,0.12),transparent 70%);pointer-events:none;}
 @keyframes borderFlow{0%{background-position:-200% 0;}100%{background-position:200% 0;}}
 .logo-wrap{display:flex;align-items:center;gap:13px;margin-bottom:28px;}
-.logo-icon{width:44px;height:44px;background:linear-gradient(135deg,#dc2626,#991b1b);border-radius:12px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 28px rgba(220,38,38,0.55),0 6px 20px rgba(0,0,0,0.5);flex-shrink:0;}
-.logo-text{font-size:16px;font-weight:800;letter-spacing:.08em;color:#fff;text-shadow:0 0 24px rgba(220,38,38,0.5);}
+.logo-icon{width:44px;height:44px;background:linear-gradient(135deg,#dc2626,#991b1b);border-radius:12px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 28px rgba(220,38,38,0.55);flex-shrink:0;}
+.logo-text{font-size:16px;font-weight:800;letter-spacing:.08em;text-shadow:0 0 24px rgba(220,38,38,0.5);}
 .logo-sub{font-size:10px;color:#8f7fb0;letter-spacing:.06em;margin-top:1px;}
-h1{font-size:26px;font-weight:900;margin-bottom:7px;letter-spacing:-.02em;}
-.sub{font-size:13px;color:#8f7fb0;margin-bottom:28px;line-height:1.5;}
+h1{font-size:22px;font-weight:900;margin-bottom:7px;}
+.sub{font-size:13px;color:#8f7fb0;margin-bottom:26px;line-height:1.6;}
 .err{background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.28);border-radius:10px;padding:10px 14px;font-size:12.5px;color:#f87171;margin-bottom:18px;}
-.flbl{display:block;font-size:10.5px;font-weight:600;color:#8f7fb0;margin-bottom:6px;letter-spacing:.07em;text-transform:uppercase;}
-.fi{width:100%;background:rgba(5,2,15,0.75);border:1px solid rgba(220,38,38,0.22);border-radius:11px;padding:10px 14px;color:#fff;font-size:13px;font-family:inherit;transition:all .2s;outline:none;margin-bottom:16px;}
-.fi:focus{border-color:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,0.14),0 0 16px rgba(220,38,38,0.35);}
-.btn{width:100%;padding:12px;background:linear-gradient(135deg,#dc2626,#991b1b);border:none;color:#fff;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .22s;box-shadow:0 4px 24px rgba(220,38,38,0.35);margin-top:4px;letter-spacing:.03em;}
-.btn:hover{box-shadow:0 4px 40px rgba(220,38,38,0.65),0 0 20px rgba(220,38,38,0.3);transform:translateY(-1px);}
-.btn:active{transform:translateY(0);}
-.alt{text-align:center;margin-top:18px;font-size:12.5px;color:#8f7fb0;}
-.alt a{color:#ef4444;font-weight:600;transition:color .2s;}
-.alt a:hover{color:#f87171;text-decoration:underline;}
+.succ{background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.28);border-radius:10px;padding:12px 16px;font-size:13px;color:#4ade80;margin-bottom:18px;text-align:center;font-weight:600;}
+.flbl{display:block;font-size:10.5px;font-weight:600;color:#8f7fb0;margin-bottom:7px;letter-spacing:.07em;text-transform:uppercase;}
+.fi,.ta{width:100%;background:rgba(5,2,15,0.75);border:1px solid rgba(220,38,38,0.22);border-radius:11px;padding:10px 14px;color:#fff;font-size:13px;font-family:inherit;transition:all .2s;outline:none;margin-bottom:16px;}
+.ta{font-family:'Courier New',monospace;resize:vertical;min-height:110px;}
+.fi:focus,.ta:focus{border-color:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,0.14),0 0 16px rgba(220,38,38,0.3);}
+.btn{width:100%;padding:13px;background:linear-gradient(135deg,#dc2626,#991b1b);border:none;color:#fff;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .22s;box-shadow:0 4px 24px rgba(220,38,38,0.35);letter-spacing:.03em;position:relative;overflow:hidden;}
+.btn:hover{box-shadow:0 4px 40px rgba(220,38,38,0.65);transform:translateY(-1px);}
+.btn:disabled{opacity:.6;cursor:not-allowed;transform:none;}
+.hint{font-size:11px;color:#584875;margin-top:-10px;margin-bottom:16px;line-height:1.5;}
+.fb-link{display:inline-flex;align-items:center;gap:7px;margin-top:6px;font-size:12px;color:#8f7fb0;transition:color .2s;}
+.fb-link:hover{color:#1877f2;}
+.loading-spin{display:none;width:18px;height:18px;border:2px solid rgba(255,255,255,0.3);border-top:2px solid #fff;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto;}
+@keyframes spin{to{transform:rotate(360deg);}}
+.progress-steps{display:flex;gap:8px;margin-bottom:28px;}
+.ps{flex:1;height:3px;border-radius:2px;background:rgba(220,38,38,0.15);}
+.ps.done{background:var(--red,#dc2626);}
+.ps.act{background:linear-gradient(90deg,#dc2626,rgba(220,38,38,0.3));animation:psAnim 1.5s ease-in-out infinite;}
+@keyframes psAnim{0%,100%{opacity:.7;}50%{opacity:1;}}
 </style>
 </head><body>
 <canvas id="cosmos"></canvas>
@@ -435,78 +468,59 @@ h1{font-size:26px;font-weight:900;margin-bottom:7px;letter-spacing:-.02em;}
     <div class="logo-icon">${I.bot}</div>
     <div><div class="logo-text">DUMMYL BOT</div><div class="logo-sub">MESSENGER AUTOMATION PLATFORM</div></div>
   </div>
-  <h1>Welcome back</h1>
-  <p class="sub">Sign in to access your bot dashboard.</p>
-  ${error?`<div class="err">${esc(error)}</div>`:""}
-  <form method="POST" action="/api/auth/login" autocomplete="on">
-    <label class="flbl">Email Address</label>
-    <input class="fi" type="email" name="email" placeholder="you@example.com" required autocomplete="email">
-    <label class="flbl">Password</label>
-    <input class="fi" type="password" name="password" placeholder="••••••••" required autocomplete="current-password">
-    <button class="btn" type="submit">Sign In</button>
-  </form>
-  <div class="alt">Don't have an account? <a href="/register">Create one</a></div>
-</div></div>
-<script>${COSMOS_JS}</script>
-</body></html>`;
-}
-
-function buildRegisterPage(error="") {
-    return `<!DOCTYPE html>
-<html lang="en"><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DUMMYL BOT — Register</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
-*{box-sizing:border-box;margin:0;padding:0;}
-html,body{height:100%;font-family:'Inter',system-ui,sans-serif;}
-body{background:#030008;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;}
-#cosmos{position:fixed;inset:0;z-index:0;pointer-events:none;}
-.wrap{position:relative;z-index:1;width:100%;max-width:460px;padding:20px;}
-.card{background:rgba(8,4,20,0.78);backdrop-filter:blur(32px);-webkit-backdrop-filter:blur(32px);border:1px solid rgba(220,38,38,0.18);border-radius:24px;padding:40px 38px;position:relative;overflow:hidden;box-shadow:0 0 70px rgba(220,38,38,0.07),0 24px 90px rgba(0,0,0,0.8);animation:cardIn .65s cubic-bezier(0.2,0,0,1);}
-@keyframes cardIn{from{opacity:0;transform:translateY(28px) scale(0.96);}to{opacity:1;transform:translateY(0) scale(1);}}
-.card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,#dc2626,#ef4444,#dc2626,transparent);background-size:200% 100%;animation:borderFlow 4s linear infinite;}
-@keyframes borderFlow{0%{background-position:-200% 0;}100%{background-position:200% 0;}}
-.logo-wrap{display:flex;align-items:center;gap:13px;margin-bottom:24px;}
-.logo-icon{width:40px;height:40px;background:linear-gradient(135deg,#dc2626,#991b1b);border-radius:11px;display:flex;align-items:center;justify-content:center;box-shadow:0 0 24px rgba(220,38,38,0.5);}
-.logo-text{font-size:15px;font-weight:800;letter-spacing:.08em;text-shadow:0 0 20px rgba(220,38,38,0.5);}
-.logo-sub{font-size:9.5px;color:#8f7fb0;letter-spacing:.06em;margin-top:1px;}
-h1{font-size:22px;font-weight:900;margin-bottom:5px;}
-.sub{font-size:12.5px;color:#8f7fb0;margin-bottom:24px;}
-.err{background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.28);border-radius:10px;padding:10px 14px;font-size:12px;color:#f87171;margin-bottom:16px;}
-.flbl{display:block;font-size:10px;font-weight:600;color:#8f7fb0;margin-bottom:5px;letter-spacing:.07em;text-transform:uppercase;}
-.fi{width:100%;background:rgba(5,2,15,0.75);border:1px solid rgba(220,38,38,0.22);border-radius:11px;padding:10px 14px;color:#fff;font-size:13px;font-family:inherit;transition:all .2s;outline:none;margin-bottom:14px;}
-.fi:focus{border-color:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,0.14),0 0 16px rgba(220,38,38,0.32);}
-.btn{width:100%;padding:12px;background:linear-gradient(135deg,#dc2626,#991b1b);border:none;color:#fff;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .22s;box-shadow:0 4px 24px rgba(220,38,38,0.35);margin-top:4px;}
-.btn:hover{box-shadow:0 4px 40px rgba(220,38,38,0.62);transform:translateY(-1px);}
-.alt{text-align:center;margin-top:16px;font-size:12.5px;color:#8f7fb0;}
-.alt a{color:#ef4444;font-weight:600;}
-.alt a:hover{color:#f87171;text-decoration:underline;}
-</style>
-</head><body>
-<canvas id="cosmos"></canvas>
-<div class="wrap"><div class="card">
-  <div class="logo-wrap">
-    <div class="logo-icon">${I.bot}</div>
-    <div><div class="logo-text">DUMMYL BOT</div><div class="logo-sub">MESSENGER AUTOMATION PLATFORM</div></div>
+  <div class="progress-steps">
+    <div class="ps ${isCookieStep?"act":"done"}"></div>
+    <div class="ps ${!isCookieStep?"act":""}"></div>
   </div>
-  <h1>Create Account</h1>
-  <p class="sub">Register to get your own bot dashboard.</p>
+  ${isCookieStep ? `
+  <h1>Connect Your Account</h1>
+  <p class="sub">Paste your Facebook session cookie to identify your bot account.</p>
   ${error?`<div class="err">${esc(error)}</div>`:""}
-  <form method="POST" action="/api/auth/register">
-    <label class="flbl">Username</label>
-    <input class="fi" type="text" name="username" placeholder="yourname" required>
-    <label class="flbl">Email Address</label>
-    <input class="fi" type="email" name="email" placeholder="you@example.com" required>
-    <label class="flbl">Password</label>
-    <input class="fi" type="password" name="password" placeholder="min 6 characters" required>
-    <label class="flbl">Confirm Password</label>
-    <input class="fi" type="password" name="confirm" placeholder="repeat password" required>
-    <button class="btn" type="submit">Create Account</button>
+  <form method="POST" action="/api/entry/cookie" id="ckForm">
+    <label class="flbl">fbstate.json Cookie</label>
+    <textarea class="ta" name="cookie" placeholder='[{"key":"c_user","value":"100xxx","domain":".facebook.com",...},...]' required></textarea>
+    <button class="btn" type="submit" id="ckBtn">Verify &amp; Continue</button>
   </form>
-  <div class="alt">Already have an account? <a href="/login">Sign in</a></div>
+  <div class="steps-g" style="margin-top:24px;display:flex;flex-direction:column;gap:8px;">
+    <div style="display:flex;align-items:flex-start;gap:12px;padding:10px 14px;background:rgba(220,38,38,0.05);border:1px solid rgba(220,38,38,0.1);border-radius:10px;">
+      <div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#991b1b);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;">1</div>
+      <div style="font-size:12px;color:#ede8f8;padding-top:2px;">Install <b>c3c-ufc-utility</b> extension on Chrome</div>
+    </div>
+    <div style="display:flex;align-items:flex-start;gap:12px;padding:10px 14px;background:rgba(220,38,38,0.05);border:1px solid rgba(220,38,38,0.1);border-radius:10px;">
+      <div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#991b1b);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;">2</div>
+      <div style="font-size:12px;color:#ede8f8;padding-top:2px;">Log in to <b>facebook.com</b>, click extension → <b>Export as JSON</b></div>
+    </div>
+    <div style="display:flex;align-items:flex-start;gap:12px;padding:10px 14px;background:rgba(220,38,38,0.05);border:1px solid rgba(220,38,38,0.1);border-radius:10px;">
+      <div style="width:22px;height:22px;border-radius:50%;background:linear-gradient(135deg,#dc2626,#991b1b);display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;flex-shrink:0;">3</div>
+      <div style="font-size:12px;color:#ede8f8;padding-top:2px;">Paste the JSON above and click <b>Verify &amp; Continue</b></div>
+    </div>
+  </div>
+  ` : `
+  <h1>Enter Your License Key</h1>
+  <p class="sub">You're connected as <b style="color:#4ade80">${esc(successName)}</b>. Enter your license key to access the dashboard.</p>
+  ${error?`<div class="err">${esc(error)}</div>`:""}
+  <form method="POST" action="/api/entry/key">
+    <input type="hidden" name="botName" value="${esc(successName)}">
+    <label class="flbl">License Key</label>
+    <input class="fi" type="text" name="licenseKey" placeholder="XXXXX-XXXXX-XXXXX-XXXXX" required autocomplete="off" style="letter-spacing:.08em;font-family:'Courier New',monospace;font-size:14px;">
+    <p class="hint">If you don't have a key, contact the developer to purchase one.</p>
+    <button class="btn" type="submit">Access Dashboard</button>
+  </form>
+  <div style="text-align:center;margin-top:20px;">
+    <a href="https://www.facebook.com/profile.php?id=61580437366762" target="_blank" class="fb-link">
+      ${I.fb} <span>Contact developer on Facebook</span>
+    </a>
+  </div>
+  `}
 </div></div>
 <script>${COSMOS_JS}</script>
+<script>
+var form=document.getElementById('ckForm');
+if(form){form.addEventListener('submit',function(e){
+  var btn=document.getElementById('ckBtn');
+  if(btn){btn.disabled=true;btn.innerHTML='<div class="loading-spin" style="display:inline-block"></div> Verifying...';}
+});}
+</script>
 </body></html>`;
 }
 
@@ -516,11 +530,13 @@ function buildLayout(session, mainTab, content) {
     const us  = getUserState(uid);
     const statusClass = us.loggedIn ? "st-on" : us.reconnecting ? "st-warn" : "st-off";
     const statusLabel = us.loggedIn ? "Online" : us.reconnecting ? "Connecting" : "Offline";
-    const initials = (session.username||"U").slice(0,2).toUpperCase();
+    const displayName = session.username || us.botName || "User";
+    const initials = displayName.slice(0,2).toUpperCase();
 
     const navItems = [
         {id:"dashboard",label:"Dashboard",icon:I.grid},
         {id:"account",  label:"Account Status",icon:I.user},
+        {id:"tempmail",  label:"Temp Mail",icon:I.mail},
         {id:"about",    label:"About",icon:I.info},
         ...(session.isAdmin ? [{id:"admin",label:"Admin Panel",icon:I.shield}] : []),
     ];
@@ -553,7 +569,7 @@ function buildLayout(session, mainTab, content) {
     <div class="u-pill">
       <div class="u-av">${initials}</div>
       <div class="u-info">
-        <div class="u-name">${esc(session.username||"User")}</div>
+        <div class="u-name">${esc(displayName)}</div>
         <div class="u-role">${session.isAdmin?"Administrator":"Member"}</div>
       </div>
     </div>
@@ -609,7 +625,7 @@ function buildOverviewContent(uid) {
     <div class="hero-l">
       <div class="hero-ic">${I.bot}</div>
       <div>
-        <div class="hero-title">DUMMYL BOT <span class="hero-ver">v2.3</span></div>
+        <div class="hero-title">DUMMYL BOT <span class="hero-ver">v2.4</span></div>
         <div class="hero-desc">${esc(acct.name||us.botName||"Awaiting login")} ${acct.uid?`· ID: ${esc(acct.uid)}`:""}
         </div>
         <div class="hero-pills">
@@ -662,7 +678,7 @@ function buildOverviewContent(uid) {
 </script>`;
 }
 
-// ─── MESSAGES TAB ─────────────────────────────────────────────────────────────
+// ─── MESSAGES / LOOP QUEUE ────────────────────────────────────────────────────
 function buildMessagesContent(uid) {
     const cfg = readBotConfig(uid);
     const customReplies = readCustomReplies(uid);
@@ -680,7 +696,7 @@ function buildMessagesContent(uid) {
     </form>
   </div>
 </div>`).join("")
-        : `<div class="photo-empty">No photos uploaded yet. Upload photos to use them in loop &amp; auto-respond.</div>`;
+        : `<div class="photo-empty">No photos uploaded yet.</div>`;
 
     const customList = customReplies.length
         ? customReplies.map((r,i) => `
@@ -700,29 +716,17 @@ function buildMessagesContent(uid) {
     return `
 <div class="shd">${I.image} Photo Pool</div>
 <div class="box">
-  <div class="bh">
-    <span class="chip chip-p">PHOTOS</span>
-    <span class="bt">Loop &amp; Auto-Respond Photos</span>
-    <span class="bm">${uploads.length} photo${uploads.length!==1?"s":""}</span>
-  </div>
+  <div class="bh"><span class="chip chip-p">PHOTOS</span><span class="bt">Loop &amp; Auto-Respond Photos</span><span class="bm">${uploads.length} photo${uploads.length!==1?"s":""}</span></div>
   <div class="add-row">
-    <label class="upload-btn-label" for="photo-file-input">
-      ${I.upload} Upload Photo
-      <input type="file" id="photo-file-input" accept="image/*" style="display:none" onchange="handlePhotoUpload(this)">
-    </label>
+    <label class="upload-btn-label" for="photo-file-input">${I.upload} Upload Photo<input type="file" id="photo-file-input" accept="image/*" style="display:none" onchange="handlePhotoUpload(this)"></label>
     <span style="font-size:11px;color:var(--gray2)">Max 5MB · JPG, PNG, GIF, WebP</span>
     <span id="upload-status" style="font-size:11px;color:var(--ok);margin-left:auto;display:none">Uploading...</span>
   </div>
   <div class="photo-grid">${photoGrid}</div>
 </div>
-
 <div class="shd">${I.msg} Messages</div>
 <div class="box">
-  <div class="bh">
-    <span class="chip">POOL</span>
-    <span class="bt">Loop &amp; Auto-Respond Messages</span>
-    <span class="bm">${(useBuiltin?replies.length:0)+customReplies.length} total</span>
-  </div>
+  <div class="bh"><span class="chip">POOL</span><span class="bt">Loop &amp; Auto-Respond Messages</span><span class="bm">${(useBuiltin?replies.length:0)+customReplies.length} total</span></div>
   <div style="padding:12px 16px;border-bottom:1px solid var(--border);">
     <form method="POST" action="/api/config/toggle-prebuilt" style="margin:0">
       <label class="tr-row" style="padding:4px 0">
@@ -741,17 +745,13 @@ function buildMessagesContent(uid) {
   </div>
   ${customList}
 </div>
-
 <details class="box">
   <summary class="bh" style="cursor:pointer;user-select:none">
-    <span class="chip chip-b">BUILT-IN</span>
-    <span class="bt">Pre-made Messages</span>
-    <span class="bm">${replies.length} messages</span>
+    <span class="chip chip-b">BUILT-IN</span><span class="bt">Pre-made Messages</span><span class="bm">${replies.length} messages</span>
     <svg width="14" height="14" fill="none" stroke="var(--gray)" stroke-width="2" viewBox="0 0 24 24" style="margin-left:8px"><polyline points="6 9 12 15 18 9"/></svg>
   </summary>
   <div style="max-height:220px;overflow-y:auto;">${builtinPreview}</div>
 </details>
-
 <script>
 function handlePhotoUpload(input){
   var file=input.files[0];if(!file)return;
@@ -759,13 +759,8 @@ function handlePhotoUpload(input){
   var st=document.getElementById('upload-status');if(st)st.style.display='';
   var reader=new FileReader();
   reader.onload=function(e){
-    fetch('/api/images/upload',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({imageData:e.target.result,imageName:file.name})
-    }).then(function(){window.location.href='/?tab=dashboard&itab=messages';}).catch(function(){
-      if(st)st.textContent='Upload failed';
-    });
+    fetch('/api/images/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({imageData:e.target.result,imageName:file.name})})
+    .then(function(){window.location.href='/?tab=dashboard&itab=messages';}).catch(function(){if(st)st.textContent='Upload failed';});
   };
   reader.readAsDataURL(file);
 }
@@ -788,43 +783,27 @@ function buildThreadsContent(uid) {
     ${!us.loopEnabled?.[tid]?`<form method="POST" action="/api/thread/startloop" style="margin:0"><input type="hidden" name="threadID" value="${esc(tid)}"><button class="btn btn-sm btn-r" style="font-size:11px;padding:4px 10px">Start Loop</button></form>`:`<form method="POST" action="/api/thread/stoploop" style="margin:0"><input type="hidden" name="threadID" value="${esc(tid)}"><button class="btn btn-sm btn-danger" style="font-size:11px;padding:4px 10px">Stop Loop</button></form>`}
   </div></td>
 </tr>`).join("");
-
-    const wlRows = wl.uids.map(u=>`<tr>
-  <td class="td-m">${esc(u)}</td>
-  <td><form method="POST" action="/api/whitelist/remove" style="margin:0"><input type="hidden" name="uid" value="${esc(u)}"><button class="btn btn-danger btn-xs">Remove</button></form></td>
-</tr>`).join("");
-
+    const wlRows = wl.uids.map(u=>`<tr><td class="td-m">${esc(u)}</td><td><form method="POST" action="/api/whitelist/remove" style="margin:0"><input type="hidden" name="uid" value="${esc(u)}"><button class="btn btn-danger btn-xs">Remove</button></form></td></tr>`).join("");
     return `
 <div class="box">
   <div class="bh"><span class="chip chip-g">LIVE</span><span class="bt">Thread Registry</span><span class="bm">${activeLoops.length} loops active</span></div>
-  <table>
-    <thead><tr><th>Thread ID</th><th>Loop</th><th>Auto-Respond</th><th>Controls</th></tr></thead>
-    <tbody>${threadRows||`<tr><td colspan="4" class="td-e">No active threads</td></tr>`}</tbody>
-  </table>
+  <table><thead><tr><th>Thread ID</th><th>Loop</th><th>Auto-Respond</th><th>Controls</th></tr></thead>
+  <tbody>${threadRows||`<tr><td colspan="4" class="td-e">No active threads</td></tr>`}</tbody></table>
 </div>
 <div style="display:flex;gap:12px;margin-bottom:16px">
-  <form method="POST" action="/api/thread/stopall" style="margin:0">
-    <button class="btn btn-danger">Stop All Loops</button>
-  </form>
+  <form method="POST" action="/api/thread/stopall" style="margin:0"><button class="btn btn-danger">Stop All Loops</button></form>
 </div>
 <div class="box">
-  <div class="bh">
-    <span class="chip ${wl.enabled?"chip-g":"chip-y"}">${wl.enabled?"ENABLED":"DISABLED"}</span>
-    <span class="bt">Whitelist</span>
-    <form method="POST" action="/api/whitelist/toggle" style="margin:0;margin-left:auto">
-      <button class="btn btn-sm btn-o">${wl.enabled?"Disable":"Enable"} Whitelist</button>
-    </form>
+  <div class="bh"><span class="chip ${wl.enabled?"chip-g":"chip-y"}">${wl.enabled?"ENABLED":"DISABLED"}</span><span class="bt">Whitelist</span>
+    <form method="POST" action="/api/whitelist/toggle" style="margin:0;margin-left:auto"><button class="btn btn-sm btn-o">${wl.enabled?"Disable":"Enable"} Whitelist</button></form>
   </div>
   <div class="add-row">
     <form method="POST" action="/api/whitelist/add" style="display:flex;gap:10px;width:100%;margin:0">
-      <input class="ai" name="uid" placeholder="Add Facebook UID...">
-      <button class="btn-a" type="submit">Add</button>
+      <input class="ai" name="uid" placeholder="Add Facebook UID..."><button class="btn-a" type="submit">Add</button>
     </form>
   </div>
-  <table>
-    <thead><tr><th>User ID</th><th>Action</th></tr></thead>
-    <tbody>${wlRows||`<tr><td colspan="2" class="td-e">Whitelist is empty</td></tr>`}</tbody>
-  </table>
+  <table><thead><tr><th>User ID</th><th>Action</th></tr></thead>
+  <tbody>${wlRows||`<tr><td colspan="2" class="td-e">Whitelist is empty</td></tr>`}</tbody></table>
 </div>`;
 }
 
@@ -838,20 +817,14 @@ function buildConfigContent(uid) {
 <div class="box">
   <div class="bh"><span class="chip chip-p">BANNER</span><span class="bt">!banner Command Photo</span><span class="bm">1 slot</span></div>
   <div style="padding:18px 20px">
-    ${hasBanner
-        ? `<img class="banner-preview" src="/banner?t=${Date.now()}" alt="Current banner">`
-        : `<div class="banner-empty-prev">No banner uploaded — !banner will use default URL</div>`}
+    ${hasBanner?`<img class="banner-preview" src="/banner?t=${Date.now()}" alt="Current banner">`:`<div class="banner-empty-prev">No banner uploaded — !banner will use default URL</div>`}
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px">
-      <label class="upload-btn-label" for="banner-file-input">
-        ${I.upload} ${hasBanner?"Change Banner":"Upload Banner"}
-        <input type="file" id="banner-file-input" accept="image/*" style="display:none" onchange="handleBannerUpload(this)">
-      </label>
+      <label class="upload-btn-label" for="banner-file-input">${I.upload} ${hasBanner?"Change Banner":"Upload Banner"}<input type="file" id="banner-file-input" accept="image/*" style="display:none" onchange="handleBannerUpload(this)"></label>
       ${hasBanner?`<form method="POST" action="/api/banner/remove" style="margin:0"><button class="btn btn-danger btn-sm">Remove Banner</button></form>`:""}
     </div>
     <div class="fhint" style="margin-top:8px">Upload a photo and type <code style="color:var(--red3);font-size:11px">!banner</code> (no URL) to use this image as the group banner.</div>
   </div>
 </div>
-
 <div class="shd">${I.config} Bot Configuration</div>
 <form method="POST" action="/api/config/save">
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
@@ -898,10 +871,8 @@ function handleBannerUpload(input){
   if(file.size>5*1024*1024){alert('Max file size is 5MB');input.value='';return;}
   var reader=new FileReader();
   reader.onload=function(e){
-    fetch('/api/banner/upload',{
-      method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({bannerData:e.target.result})
-    }).then(function(){window.location.href='/?tab=dashboard&itab=config';});
+    fetch('/api/banner/upload',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({bannerData:e.target.result})})
+    .then(function(){window.location.href='/?tab=dashboard&itab=config';});
   };
   reader.readAsDataURL(file);
 }
@@ -962,77 +933,12 @@ function buildCustomCmdsContent(uid) {
 // ─── COMMANDS REFERENCE ───────────────────────────────────────────────────────
 function buildCommandsContent(uid) {
     const sections = [
-        {title:"Loop", color:"var(--red2)", cmds:[
-            {n:".",d:"Toggle loop on/off in any chat"},
-            {n:". <uid/name>",d:"Toggle PM loop with a user"},
-            {n:"!stop",d:"Stop loop in current thread"},
-            {n:"!looppm <uid>",d:"Start PM loop with UID"},
-            {n:"!stoppm <uid>",d:"Stop PM loop with UID"},
-            {n:"!schedule <sec> <msg>",d:"Send message after delay"},
-        ]},
-        {title:"Auto-Respond", color:"#f59e0b", cmds:[
-            {n:"!on",d:"Enable auto-respond in group"},
-            {n:"!off",d:"Disable auto-respond"},
-            {n:"!mute",d:"Mute auto-respond (keep enabled)"},
-            {n:"!unmute",d:"Unmute auto-respond"},
-            {n:"!broadcast <msg>",d:"Send to all auto-respond threads"},
-        ]},
-        {title:"Group Tools", color:"#60a5fa", cmds:[
-            {n:"!nn <name>",d:"Set nickname for all members"},
-            {n:"!nn1 <uid> <name>",d:"Set nickname for one member"},
-            {n:"!clearnn",d:"Clear all nicknames"},
-            {n:"!cg <name>",d:"Lock group name"},
-            {n:"!uncg",d:"Unlock group name"},
-            {n:"!banner [url]",d:"Set &amp; lock group banner (uses upload if no URL)"},
-            {n:"!unbanner",d:"Unlock banner"},
-            {n:"!kick <uid>",d:"Remove member from group"},
-            {n:"!add <uid>",d:"Add member to group"},
-            {n:"!promote <uid>",d:"Promote to admin"},
-            {n:"!demote <uid>",d:"Remove admin"},
-            {n:"!emoji <emoji>",d:"Change thread emoji"},
-            {n:"!color <name>",d:"Change thread color"},
-            {n:"!freeze",d:"Freeze group (kick non-admins)"},
-            {n:"!unfreeze",d:"Unfreeze group"},
-            {n:"!gmute <uid>",d:"Mute a specific member"},
-            {n:"!gunmute <uid>",d:"Unmute a member"},
-            {n:"!perms <uid> <time>",d:"Give temp command access"},
-            {n:"!revoke [uid]",d:"Revoke temp permissions"},
-            {n:"!forward <tid> <msg>",d:"Forward message to thread"},
-            {n:"!lock",d:"Show lock status"},
-            {n:"!members",d:"List group members"},
-            {n:"!antirestrict",d:"Toggle anti-restrict mode"},
-        ]},
-        {title:"Voice & Music", color:"#c084fc", cmds:[
-            {n:"!vm <text>",d:"Send TTS as chipmunk voice"},
-            {n:"!vmpm <uid> <text>",d:"Send TTS to a PM"},
-            {n:"!p <song>",d:"Search YouTube and send audio"},
-            {n:"!p <youtube url>",d:"Send YouTube audio directly"},
-        ]},
-        {title:"Tools", color:"var(--ok)", cmds:[
-            {n:"!say <text>",d:"Send a message"},
-            {n:"!spam <n> <text>",d:"Send message n times"},
-            {n:"!count",d:"Count from 1 to 20"},
-            {n:"!react <emoji>",d:"React to replied message"},
-            {n:"!seen",d:"Mark thread as read"},
-            {n:"!id",d:"Get sender ID of replied message"},
-            {n:"!myid",d:"Get your own ID"},
-            {n:"!info",d:"Get thread info"},
-            {n:"!status",d:"Bot status in thread"},
-            {n:"!test",d:"Ping the bot"},
-            {n:"!gp [url/off]",d:"Lock profile picture"},
-        ]},
-        {title:"Fun", color:"#fb923c", cmds:[
-            {n:"!flip",d:"Flip a coin"},
-            {n:"!roll [n]",d:"Roll dice (default d6)"},
-            {n:"!8ball <question>",d:"Ask the magic 8-ball"},
-            {n:"!pick a|b|c",d:"Pick a random option"},
-            {n:"!reverse <text>",d:"Reverse text"},
-            {n:"!shout <text>",d:"Shout text with spaces"},
-            {n:"!mock <text>",d:"mOcK tExT"},
-            {n:"!clap <text>",d:"Add claps 👏 between words"},
-            {n:"!timer <sec>",d:"Set a countdown timer"},
-            {n:"!repeat <n> <text>",d:"Repeat text n times"},
-        ]},
+        {title:"Loop",color:"var(--red2)",cmds:[{n:".",d:"Toggle loop on/off in any chat"},{n:". <uid/name>",d:"Toggle PM loop with a user"},{n:"!stop",d:"Stop loop in current thread"},{n:"!looppm <uid>",d:"Start PM loop with UID"},{n:"!stoppm <uid>",d:"Stop PM loop with UID"},{n:"!schedule <sec> <msg>",d:"Send message after delay"}]},
+        {title:"Auto-Respond",color:"#f59e0b",cmds:[{n:"!on",d:"Enable auto-respond in group"},{n:"!off",d:"Disable auto-respond"},{n:"!mute",d:"Mute auto-respond (keep enabled)"},{n:"!unmute",d:"Unmute auto-respond"},{n:"!broadcast <msg>",d:"Send to all auto-respond threads"}]},
+        {title:"Group Tools",color:"#60a5fa",cmds:[{n:"!nn <name>",d:"Set nickname for all members"},{n:"!nn1 <uid> <name>",d:"Set nickname for one member"},{n:"!clearnn",d:"Clear all nicknames"},{n:"!cg <name>",d:"Lock group name"},{n:"!uncg",d:"Unlock group name"},{n:"!banner [url]",d:"Set &amp; lock group banner"},{n:"!unbanner",d:"Unlock banner"},{n:"!kick <uid>",d:"Remove member from group"},{n:"!add <uid>",d:"Add member to group"},{n:"!promote <uid>",d:"Promote to admin"},{n:"!demote <uid>",d:"Remove admin"},{n:"!emoji <emoji>",d:"Change thread emoji"},{n:"!color <name>",d:"Change thread color"},{n:"!freeze",d:"Freeze group"},{n:"!unfreeze",d:"Unfreeze group"},{n:"!gmute <uid>",d:"Mute a specific member"},{n:"!gunmute <uid>",d:"Unmute a member"},{n:"!perms <uid> <time>",d:"Give temp command access"},{n:"!revoke [uid]",d:"Revoke temp permissions"},{n:"!forward <tid> <msg>",d:"Forward message to thread"},{n:"!lock",d:"Show lock status"},{n:"!members",d:"List group members"},{n:"!antirestrict",d:"Toggle anti-restrict mode"}]},
+        {title:"Voice & Music",color:"#c084fc",cmds:[{n:"!vm <text>",d:"Send TTS as chipmunk voice"},{n:"!vmpm <uid> <text>",d:"Send TTS to a PM"},{n:"!p <song>",d:"Search YouTube and send audio"},{n:"!p <youtube url>",d:"Send YouTube audio directly"}]},
+        {title:"Tools",color:"var(--ok)",cmds:[{n:"!say <text>",d:"Send a message"},{n:"!spam <n> <text>",d:"Send message n times"},{n:"!count",d:"Count from 1 to 20"},{n:"!react <emoji>",d:"React to replied message"},{n:"!seen",d:"Mark thread as read"},{n:"!id",d:"Get sender ID of replied message"},{n:"!myid",d:"Get your own ID"},{n:"!info",d:"Get thread info"},{n:"!status",d:"Bot status in thread"},{n:"!test",d:"Ping the bot"},{n:"!gp [url/off]",d:"Lock profile picture"}]},
+        {title:"Fun",color:"#fb923c",cmds:[{n:"!flip",d:"Flip a coin"},{n:"!roll [n]",d:"Roll dice (default d6)"},{n:"!8ball <question>",d:"Ask the magic 8-ball"},{n:"!pick a|b|c",d:"Pick a random option"},{n:"!reverse <text>",d:"Reverse text"},{n:"!shout <text>",d:"Shout text with spaces"},{n:"!mock <text>",d:"mOcK tExT"},{n:"!clap <text>",d:"Add claps between words"},{n:"!timer <sec>",d:"Set a countdown timer"},{n:"!repeat <n> <text>",d:"Repeat text n times"}]},
     ];
     return `
 <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px">
@@ -1046,12 +952,117 @@ ${sections.map(s=>`
 </div>`;
 }
 
+// ─── TEMP MAIL ────────────────────────────────────────────────────────────────
+function buildTempMailContent(uid) {
+    return `
+<div class="hero">
+  <div class="hero-in">
+    <div class="hero-l">
+      <div class="hero-ic">${I.mail}</div>
+      <div>
+        <div class="hero-title">Temp Mail <span class="hero-ver">LIVE</span></div>
+        <div class="hero-desc">Generate disposable email addresses. Inbox refreshes automatically.</div>
+      </div>
+    </div>
+  </div>
+</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px">
+  <div class="box" style="padding:20px">
+    <div class="bt" style="margin-bottom:12px">Your Temp Email</div>
+    <div class="mail-addr" id="mailAddr">Generating...</div>
+    <div style="font-size:11px;color:var(--gray);margin-top:6px" id="mailToken"></div>
+    <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap">
+      <button class="btn btn-r btn-sm" onclick="generateEmail()">Generate New Email</button>
+      <button class="btn btn-o btn-sm" onclick="copyEmail()">${I.upload} Copy</button>
+    </div>
+  </div>
+  <div class="box" style="padding:20px">
+    <div class="bt" style="margin-bottom:8px">Inbox</div>
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px">
+      <button class="btn btn-o btn-sm" onclick="refreshInbox()" id="refreshBtn">${I.refresh} Refresh</button>
+      <span style="font-size:11px;color:var(--gray)" id="inboxStatus">—</span>
+      <label class="tr-row" style="margin-left:auto;padding:0;gap:7px">
+        <input type="checkbox" class="tck" id="autoRefCheck" onchange="toggleAutoRef()">
+        <span class="ttr"><span class="tth"></span></span>
+        <span style="font-size:11px;color:var(--gray)">Auto-refresh (10s)</span>
+      </label>
+    </div>
+    <div id="inboxList" style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:10px">
+      <div style="padding:26px;text-align:center;color:var(--gray2);font-size:12px">Generate an email first, then your inbox will appear here.</div>
+    </div>
+  </div>
+</div>
+<div class="box" id="msgView" style="display:none">
+  <div class="bh" style="cursor:pointer" onclick="document.getElementById('msgView').style.display='none'">
+    <span class="chip chip-b">MESSAGE</span><span class="bt" id="msgSubject">—</span>
+    <span class="bm" style="color:var(--red2)">Click to close</span>
+  </div>
+  <div class="inbox-body" id="msgBody"></div>
+</div>
+<script>
+var mailToken=null,mailAddr=null,autoRefTimer=null;
+function generateEmail(){
+  document.getElementById('mailAddr').textContent='Generating...';
+  document.getElementById('mailToken').textContent='';
+  fetch('/api/tempmail/generate',{method:'POST'}).then(r=>r.json()).then(d=>{
+    if(d.error){document.getElementById('mailAddr').textContent='Error: '+d.error;return;}
+    mailAddr=d.address;mailToken=d.token;
+    document.getElementById('mailAddr').textContent=d.address;
+    document.getElementById('mailToken').textContent='Token: '+d.token.slice(0,20)+'...';
+    document.getElementById('inboxStatus').textContent='Inbox ready';
+    refreshInbox();
+  }).catch(()=>{document.getElementById('mailAddr').textContent='Failed to generate';});
+}
+function copyEmail(){
+  if(mailAddr)navigator.clipboard&&navigator.clipboard.writeText(mailAddr).then(()=>{document.getElementById('inboxStatus').textContent='Copied!';setTimeout(()=>{document.getElementById('inboxStatus').textContent='';},2000);});
+}
+function refreshInbox(){
+  if(!mailToken){document.getElementById('inboxStatus').textContent='No email generated yet';return;}
+  var btn=document.getElementById('refreshBtn');
+  if(btn)btn.style.opacity='.5';
+  document.getElementById('inboxStatus').textContent='Refreshing...';
+  fetch('/api/tempmail/inbox?token='+encodeURIComponent(mailToken)).then(r=>r.json()).then(d=>{
+    if(btn)btn.style.opacity='1';
+    if(d.error){document.getElementById('inboxStatus').textContent='Error: '+d.error;return;}
+    var msgs=d.messages||[];
+    document.getElementById('inboxStatus').textContent=msgs.length+' message'+(msgs.length!==1?'s':'');
+    var el=document.getElementById('inboxList');
+    if(!msgs.length){el.innerHTML='<div style="padding:26px;text-align:center;color:var(--gray2);font-size:12px">Inbox is empty. Waiting for emails...</div>';return;}
+    el.innerHTML=msgs.map(function(m){
+      var id=JSON.stringify(m.id);
+      var subj=JSON.stringify(m.subject||'(no subject)');
+      return '<div class="inbox-item" onclick="viewMsg('+id+','+subj+')">'
+        +'<div class="inbox-from">'+escHtml(m.from||'Unknown')+'</div>'
+        +'<div class="inbox-subj">'+escHtml(m.subject||'(no subject)')+'</div>'
+        +'<div class="inbox-date">'+escHtml(m.date||'')+'</div>'
+        +'</div>';
+    }).join('');
+  }).catch(()=>{if(btn)btn.style.opacity='1';document.getElementById('inboxStatus').textContent='Refresh failed';});
+}
+function viewMsg(id,subject){
+  document.getElementById('msgSubject').textContent=subject;
+  document.getElementById('msgBody').textContent='Loading...';
+  document.getElementById('msgView').style.display='';
+  fetch('/api/tempmail/message?token='+encodeURIComponent(mailToken)+'&id='+encodeURIComponent(id)).then(r=>r.json()).then(d=>{
+    document.getElementById('msgBody').textContent=d.body||d.text||'(empty)';
+  }).catch(()=>{document.getElementById('msgBody').textContent='Failed to load message.';});
+}
+function toggleAutoRef(){
+  var chk=document.getElementById('autoRefCheck');
+  if(chk.checked){autoRefTimer=setInterval(refreshInbox,10000);}
+  else{clearInterval(autoRefTimer);autoRefTimer=null;}
+}
+function escHtml(str){return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+generateEmail();
+</script>`;
+}
+
 // ─── DASHBOARD CONTENT ────────────────────────────────────────────────────────
 function buildDashboardContent(uid, innerTab) {
     const it = innerTab==="loop"?"messages":innerTab;
     const tabs = [
         {id:"overview",  label:"Overview",      icon:I.grid},
-        {id:"messages",  label:"Messages",       icon:I.msg},
+        {id:"messages",  label:"Loop Queue",     icon:I.msg},
         {id:"threads",   label:"Threads",        icon:I.threads},
         {id:"config",    label:"Config",         icon:I.config},
         {id:"cookie",    label:"Cookie",         icon:I.cookie},
@@ -1078,11 +1089,21 @@ function buildAccountContent(uid) {
     const alerts=(us.alerts||[]).slice(0,20);
     const alertHtml=alerts.length?alerts.map(a=>`<div class="lr lr-${a.type}"><span class="lt">${esc(a.time||"")}</span><span class="ll">${(a.type||"").toUpperCase()}</span><span class="lm">${esc((a.message||"").slice(0,120))}</span></div>`).join(""):
         `<div style="padding:22px;text-align:center;color:var(--gray2);font-size:12px">No alerts</div>`;
+    const userObj = auth.getUser(uid) || {};
     return `
 <div class="sg" style="grid-template-columns:repeat(3,1fr)">
   <div class="sc"><div class="sc-glow gc-r"></div><div class="sc-ico ci-r">${I.user}</div><div class="sc-val">${esc(acct.name||us.botName||"—")}</div><div class="sc-lbl">Bot Account Name</div></div>
   <div class="sc"><div class="sc-glow gc-w"></div><div class="sc-ico ci-w"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div><div class="sc-val">${esc(acct.uid||"—")}</div><div class="sc-lbl">Bot Facebook ID</div></div>
   <div class="sc"><div class="sc-glow gc-o"></div><div class="sc-ico ci-o">${I.clock}</div><div class="sc-val">${getUptime(uid)}</div><div class="sc-lbl">Uptime</div></div>
+</div>
+<div class="box" style="padding:18px 20px">
+  <div class="bt" style="margin-bottom:14px">Session Info</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+    <div style="font-size:12px;color:var(--gray)">IP Address</div><div style="font-size:12px;color:var(--off);font-family:monospace">${esc(userObj.ip||"—")}</div>
+    <div style="font-size:12px;color:var(--gray)">Device / Browser</div><div style="font-size:12px;color:var(--off);word-break:break-all">${esc((userObj.userAgent||"—").slice(0,80))}</div>
+    <div style="font-size:12px;color:var(--gray)">Last Seen</div><div style="font-size:12px;color:var(--off)">${userObj.lastSeen?new Date(userObj.lastSeen).toLocaleString():"—"}</div>
+    <div style="font-size:12px;color:var(--gray)">Account ID</div><div style="font-size:12px;color:var(--off);font-family:monospace">${esc(uid)}</div>
+  </div>
 </div>
 <div class="box">
   <div class="bh"><span class="chip chip-y">ALERTS</span><span class="bt">Recent Alerts</span><span class="bm">${alerts.length} alerts</span></div>
@@ -1097,7 +1118,7 @@ function buildAboutContent() {
   <div class="hero-l">
     <div class="hero-ic">${I.bot}</div>
     <div>
-      <div class="hero-title">DUMMYL BOT <span class="hero-ver">v2.3</span></div>
+      <div class="hero-title">DUMMYL BOT <span class="hero-ver">v2.4</span></div>
       <div class="hero-desc">Facebook Messenger Automation Platform</div>
     </div>
   </div>
@@ -1109,12 +1130,13 @@ function buildAboutContent() {
       <div style="display:flex;justify-content:space-between"><span style="color:var(--gray);font-size:12px">Name</span><span style="font-size:12.5px;color:var(--off)">Kyle Gaspari (cozy)</span></div>
       <div style="display:flex;justify-content:space-between"><span style="color:var(--gray);font-size:12px">FB Dev ID</span><span style="font-size:12px;color:var(--off);font-family:monospace">61585831139336</span></div>
       <div style="display:flex;justify-content:space-between"><span style="color:var(--gray);font-size:12px">Bot Prefix</span><span style="font-size:13px;color:var(--red2);font-family:monospace;font-weight:700">!</span></div>
+      <div style="margin-top:6px"><a href="https://www.facebook.com/profile.php?id=61580437366762" target="_blank" style="display:inline-flex;align-items:center;gap:7px;color:#8f7fb0;font-size:12px;transition:color .2s" onmouseover="this.style.color='#1877f2'" onmouseout="this.style.color='#8f7fb0'">${I.fb} Facebook Profile</a></div>
     </div>
   </div>
   <div class="box" style="padding:22px 24px">
     <div class="bt" style="margin-bottom:14px">Tech Stack</div>
     <div style="display:flex;flex-direction:column;gap:8px">
-      ${["Node.js","ws3-fca (Facebook MQTT)","bcryptjs (Auth)","@distube/ytdl-core (YouTube)","ffmpeg (TTS processing)"].map(t=>`<div style="font-size:12px;color:var(--off);display:flex;align-items:center;gap:6px"><span style="width:5px;height:5px;border-radius:50%;background:var(--red);display:inline-block"></span>${t}</div>`).join("")}
+      ${["Node.js","ws3-fca (Facebook MQTT)","bcryptjs (Auth)","@distube/ytdl-core (YouTube)","axios (HTTP)","mail.tm (Temp Mail API)"].map(t=>`<div style="font-size:12px;color:var(--off);display:flex;align-items:center;gap:6px"><span style="width:5px;height:5px;border-radius:50%;background:var(--red);display:inline-block"></span>${t}</div>`).join("")}
     </div>
   </div>
 </div>`;
@@ -1123,19 +1145,28 @@ function buildAboutContent() {
 // ─── ADMIN ────────────────────────────────────────────────────────────────────
 function buildAdminContent() {
     const users      = auth.getAllUsers();
+    const allKeys    = auth.readKeys();
     const activeSess = auth.getActiveSessions();
     const activeMap  = {};
     for (const s of activeSess) activeMap[s.userId]=s;
 
     const rows = users.map(u=>{
         const isActive=!!activeMap[u.id];
-        const actSince=isActive&&activeMap[u.id].createdAt?new Date(activeMap[u.id].createdAt).toLocaleTimeString():"—";
+        const keyObj = allKeys.find(k=>k.userId===u.id&&!k.revoked);
         return `<tr>
-<td><b style="color:var(--white)">${esc(u.username)}</b><div style="font-size:10.5px;color:var(--gray)">${esc(u.email)}</div></td>
+<td>
+  <b style="color:var(--white)">${esc(u.botName||u.username||"(unnamed)")}</b>
+  <div style="font-size:10.5px;color:var(--gray)">${esc(u.id)}</div>
+  ${u.accountId?`<div style="font-size:10px;color:var(--gray2);font-family:monospace">FB: ${esc(u.accountId)}</div>`:""}
+</td>
 <td>${isActive?`<span class="tag tag-g">Online</span>`:`<span class="tag tag-d">Offline</span>`}</td>
-<td><span class="pass-cell" title="Click to copy" onclick="navigator.clipboard&&navigator.clipboard.writeText('${esc(u.passwordPlain||"(hidden)")}').then(()=>this.style.borderColor='#22c55e')">${esc(u.passwordPlain||"(hidden)")}</span></td>
+<td>
+  ${u.ip?`<div style="font-family:monospace;font-size:11px;color:var(--off)">${esc(u.ip)}</div>`:`<span style="color:var(--gray2)">—</span>`}
+  ${u.userAgent?`<div style="font-size:10px;color:var(--gray2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(u.userAgent)}">${esc(u.userAgent.slice(0,50))}</div>`:""}
+</td>
+<td>${keyObj?`<span class="key-cell" title="Click to copy" onclick="navigator.clipboard&&navigator.clipboard.writeText('${esc(keyObj.key)}').then(()=>this.style.borderColor='#22c55e')">${esc(keyObj.key)}</span>`:`<span style="color:var(--gray2);font-size:11px">${u.isAdmin?"ADMIN KEY":"No key"}</span>`}</td>
 <td style="font-size:11px;color:var(--gray)">${u.lastSeen?new Date(u.lastSeen).toLocaleString():"Never"}</td>
-<td>${u.isBanned?`<span class="tag tag-r">BANNED</span>`:(u.isAdmin?`<span class="tag tag-b">ADMIN</span>`:`<span class="tag tag-g">OK</span>`)}</td>
+<td>${u.isBanned?`<span class="tag tag-r">BANNED</span>`:(u.isAdmin?`<span class="tag tag-b">ADMIN</span>`:`<span class="tag tag-g">ACTIVE</span>`)}</td>
 <td><div style="display:flex;gap:5px;flex-wrap:wrap">
   ${!u.isAdmin&&!u.isBanned?`<form method="POST" action="/admin/ban" style="margin:0"><input type="hidden" name="userId" value="${esc(u.id)}"/><button class="btn btn-danger btn-xs">Ban</button></form>`:""}
   ${!u.isAdmin&&u.isBanned?`<form method="POST" action="/admin/unban" style="margin:0"><input type="hidden" name="userId" value="${esc(u.id)}"/><button class="btn btn-o btn-xs">Unban</button></form>`:""}
@@ -1144,53 +1175,55 @@ function buildAdminContent() {
 </tr>`;
     }).join("");
 
+    const keyRows = allKeys.map(k=>`<tr>
+<td class="td-m"><span class="key-cell" onclick="navigator.clipboard&&navigator.clipboard.writeText('${esc(k.key)}').then(()=>this.style.borderColor='#22c55e')">${esc(k.key)}</span></td>
+<td style="font-size:12px;color:var(--off)">${esc(k.label||"—")}</td>
+<td style="font-size:11px;color:var(--gray)">${esc(k.userId)}</td>
+<td>${k.revoked?`<span class="tag tag-r">REVOKED</span>`:`<span class="tag tag-g">ACTIVE</span>`}</td>
+<td style="font-size:11px;color:var(--gray)">${k.createdAt?new Date(k.createdAt).toLocaleString():"—"}</td>
+<td>
+  ${!k.revoked?`<form method="POST" action="/admin/revoke-key" style="margin:0"><input type="hidden" name="key" value="${esc(k.key)}"/><button class="btn btn-danger btn-xs">Revoke</button></form>`:`<span style="color:var(--gray2);font-size:11px">Revoked</span>`}
+</td>
+</tr>`).join("");
+
     return `
 <div class="adm-banner">
   <div class="adm-ic">${I.shield}</div>
-  <div><div class="adm-title">Admin Control Panel</div><div class="adm-sub">${users.length} users — ${activeSess.length} online now</div></div>
+  <div><div class="adm-title">Admin Control Panel</div><div class="adm-sub">${users.length} users — ${activeSess.length} online now — ${allKeys.filter(k=>!k.revoked).length} active keys</div></div>
 </div>
-<div class="sg" style="grid-template-columns:repeat(3,1fr)">
+<div class="sg" style="grid-template-columns:repeat(4,1fr)">
   <div class="sc"><div class="sc-glow gc-r"></div><div class="sc-ico ci-r">${I.user}</div><div class="sc-val">${users.length}</div><div class="sc-lbl">Total Users</div></div>
   <div class="sc"><div class="sc-glow gc-w"></div><div class="sc-ico ci-w">${I.shield}</div><div class="sc-val">${activeSess.length}</div><div class="sc-lbl">Online Now</div></div>
-  <div class="sc"><div class="sc-glow gc-g"></div><div class="sc-ico ci-g">${I.shield}</div><div class="sc-val">${users.filter(u=>u.isBanned).length}</div><div class="sc-lbl">Banned</div></div>
+  <div class="sc"><div class="sc-glow gc-g"></div><div class="sc-ico ci-g">${I.key}</div><div class="sc-val">${allKeys.filter(k=>!k.revoked).length}</div><div class="sc-lbl">Active Keys</div></div>
+  <div class="sc"><div class="sc-glow gc-o"></div><div class="sc-ico ci-o">${I.shield}</div><div class="sc-val">${users.filter(u=>u.isBanned).length}</div><div class="sc-lbl">Banned</div></div>
 </div>
+
+<div class="box">
+  <div class="bh"><span class="chip chip-g">GENERATE</span><span class="bt">Generate License Key</span></div>
+  <div style="padding:16px 20px">
+    <form method="POST" action="/admin/generate-key" style="display:flex;gap:10px;align-items:center">
+      <input class="ai" name="label" placeholder="Label (e.g. John's key)" style="max-width:300px">
+      <button class="btn btn-r btn-sm" type="submit">${I.key} Generate Key</button>
+    </form>
+    ${(()=>{
+        const lastKey = allKeys.slice(-1)[0];
+        return lastKey && !lastKey.revoked ? `<div style="margin-top:12px;padding:12px 16px;background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);border-radius:10px;display:flex;align-items:center;gap:10px"><span style="font-size:11px;color:var(--gray)">Latest key:</span><span class="key-cell" onclick="navigator.clipboard&&navigator.clipboard.writeText('${esc(lastKey.key)}').then(()=>this.style.borderColor='#ef4444')">${esc(lastKey.key)}</span><span style="font-size:11px;color:var(--gray2)">${esc(lastKey.label||"")}</span></div>` : "";
+    })()}
+  </div>
+</div>
+
+<div class="box">
+  <div class="bh"><span class="chip">${I.key} KEYS</span><span class="bt">All License Keys</span><span class="bm">${allKeys.length} total</span></div>
+  <table><thead><tr><th>Key</th><th>Label</th><th>User ID</th><th>Status</th><th>Created</th><th>Action</th></tr></thead>
+  <tbody>${keyRows||`<tr><td colspan="6" class="td-e">No keys generated yet</td></tr>`}</tbody></table>
+</div>
+
 <div class="box">
   <div class="bh"><span class="chip">USERS</span><span class="bt">Registered Accounts</span><span class="bm">${users.length} total</span></div>
-  <table>
-    <thead><tr><th>User</th><th>Status</th><th>Password</th><th>Last Seen</th><th>Role</th><th>Actions</th></tr></thead>
-    <tbody>${rows||`<tr><td colspan="6" class="td-e">No users</td></tr>`}</tbody>
-  </table>
+  <table><thead><tr><th>Bot Name / ID</th><th>Status</th><th>IP / Device</th><th>License Key</th><th>Last Seen</th><th>Role</th><th>Actions</th></tr></thead>
+  <tbody>${rows||`<tr><td colspan="7" class="td-e">No users</td></tr>`}</tbody>
+</table>
 </div>`;
-}
-
-// ─── COOKIE GATE ──────────────────────────────────────────────────────────────
-function buildCookieGatePage(session) {
-    const content = `
-<div style="min-height:70vh;display:flex;align-items:center;justify-content:center;padding:20px 0">
-<div style="width:100%;max-width:580px">
-  <div style="text-align:center;margin-bottom:32px">
-    <div style="width:64px;height:64px;background:linear-gradient(135deg,var(--red),var(--red-dim));border-radius:18px;display:flex;align-items:center;justify-content:center;margin:0 auto 18px;box-shadow:0 0 44px rgba(220,38,38,0.55)">${I.cookie}</div>
-    <h1 style="font-size:26px;font-weight:900;margin-bottom:10px;text-shadow:0 0 30px rgba(220,38,38,0.4)">Connect Your Facebook Account</h1>
-    <p style="color:var(--gray);font-size:13px;line-height:1.7;max-width:400px;margin:0 auto">Paste your Facebook session cookie to start your bot dashboard.</p>
-  </div>
-  <div class="steps-g" style="margin-bottom:24px">
-    <div class="step"><div class="snum">1</div><div class="stxt">Install <b>c3c-ufc-utility</b> on Chrome</div></div>
-    <div class="step"><div class="snum">2</div><div class="stxt">Log in to <b>facebook.com</b></div></div>
-    <div class="step"><div class="snum">3</div><div class="stxt">Click extension → <b>Export as JSON</b></div></div>
-    <div class="step"><div class="snum">4</div><div class="stxt">Paste below and click <b>Connect Bot</b></div></div>
-  </div>
-  <div class="box">
-    <div class="bh"><span class="chip">SETUP</span><span class="bt">Paste Cookie</span></div>
-    <div style="padding:20px">
-      <form method="POST" action="/api/cookie/slot">
-        <div class="fld"><label class="flbl">Slot</label><select class="fs" name="slot"><option value="fbstate.json">Slot 1 (Primary)</option><option value="fbstate2.json">Slot 2</option><option value="fbstate3.json">Slot 3</option></select></div>
-        <div class="fld"><label class="flbl">fbstate.json Content</label><textarea class="ck-ta" name="cookie" placeholder='[{"key":"c_user","value":"100xxx",...}]' rows="6" required></textarea></div>
-        <button class="conn-btn" type="submit">${I.cookie} Connect Bot &amp; Enter Dashboard</button>
-      </form>
-    </div>
-  </div>
-</div></div>`;
-    return buildLayout(session, "dashboard", content);
 }
 
 // ─── PAGE BUILDER ─────────────────────────────────────────────────────────────
@@ -1199,10 +1232,80 @@ function buildPage(session, mainTab, innerTab) {
     const uid=session.userId;
     if (mainTab==="dashboard") content=buildDashboardContent(uid,innerTab);
     else if (mainTab==="account") content=buildAccountContent(uid);
+    else if (mainTab==="tempmail") content=buildTempMailContent(uid);
     else if (mainTab==="about")   content=buildAboutContent();
     else if (mainTab==="admin"&&session.isAdmin) content=buildAdminContent();
     else content=buildDashboardContent(uid,innerTab);
     return buildLayout(session,mainTab||"dashboard",content);
+}
+
+// ─── TEMP MAIL API (mail.tm) ──────────────────────────────────────────────────
+const https = require("https");
+function mailTmRequest(method, path_, body, token) {
+    return new Promise((resolve, reject) => {
+        const data = body ? JSON.stringify(body) : null;
+        const opts = {
+            hostname: "api.mail.tm",
+            path: path_,
+            method,
+            headers: {
+                "Content-Type": "application/json",
+                "Accept": "application/json",
+                ...(token ? { "Authorization": "Bearer "+token } : {}),
+                ...(data ? { "Content-Length": Buffer.byteLength(data) } : {}),
+            },
+        };
+        const req = https.request(opts, res => {
+            let raw = "";
+            res.on("data", c => raw += c);
+            res.on("end", () => {
+                try { resolve({ status: res.statusCode, body: JSON.parse(raw) }); }
+                catch(_) { resolve({ status: res.statusCode, body: raw }); }
+            });
+        });
+        req.on("error", reject);
+        if (data) req.write(data);
+        req.end();
+    });
+}
+
+async function generateTempMail() {
+    try {
+        const domsRes = await mailTmRequest("GET", "/domains?page=1");
+        const domains = domsRes.body?.["hydra:member"] || [];
+        if (!domains.length) return { error: "No domains available" };
+        const domain = domains[0].domain;
+        const user = "dbl" + Math.random().toString(36).slice(2,10);
+        const email = `${user}@${domain}`;
+        const pass = Math.random().toString(36).slice(2,14) + "Aa1!";
+        const createRes = await mailTmRequest("POST", "/accounts", { address: email, password: pass });
+        if (createRes.status !== 201) return { error: "Failed to create account" };
+        const tokenRes = await mailTmRequest("POST", "/token", { address: email, password: pass });
+        if (tokenRes.status !== 200) return { error: "Failed to get token" };
+        return { address: email, token: tokenRes.body.token };
+    } catch(e) { return { error: e.message }; }
+}
+
+async function getTempMailInbox(token) {
+    try {
+        const res = await mailTmRequest("GET", "/messages?page=1", null, token);
+        if (res.status !== 200) return { error: "Failed to fetch inbox" };
+        const msgs = (res.body?.["hydra:member"] || []).map(m => ({
+            id: m.id,
+            from: m.from?.address || "Unknown",
+            subject: m.subject || "(no subject)",
+            date: m.createdAt ? new Date(m.createdAt).toLocaleString() : "",
+        }));
+        return { messages: msgs };
+    } catch(e) { return { error: e.message }; }
+}
+
+async function getTempMailMessage(token, id) {
+    try {
+        const res = await mailTmRequest("GET", `/messages/${id}`, null, token);
+        if (res.status !== 200) return { error: "Failed to fetch message" };
+        return { body: res.body?.text || res.body?.html || "(empty)", subject: res.body?.subject || "" };
+    } catch(e) { return { error: e.message }; }
 }
 
 // ─── HTTP SERVER ──────────────────────────────────────────────────────────────
@@ -1211,140 +1314,200 @@ function startDashboard(port) {
         const url_  = new URL(req.url, `http://localhost`);
         const path_ = url_.pathname;
         const sess  = getSessionFromReq(req);
+        const clientIP = getClientIP(req);
+        const userAgent = req.headers["user-agent"] || "";
 
         function redirect(to,code=302){ res.writeHead(code,{Location:to});res.end(); }
         function html(body,code=200)  { res.writeHead(code,{"Content-Type":"text/html; charset=utf-8","Cache-Control":"no-store"});res.end(body); }
         function json(obj,code=200)   { res.writeHead(code,{"Content-Type":"application/json"});res.end(JSON.stringify(obj)); }
 
-        if (path_==="/login")    { if(sess)return redirect("/?tab=dashboard"); return html(buildLoginPage()); }
-        if (path_==="/register") { if(sess)return redirect("/?tab=dashboard"); return html(buildRegisterPage()); }
-        if (path_==="/"&&!sess) return html(buildLoginPage());
+        // ─── ENTRY FLOW: Cookie then Key ─────────────────────────────────
+        if ((path_==="/"||path_==="/login")&&!sess) {
+            return html(buildCookieEntryPage("","","cookie"));
+        }
+        if (path_==="/register"&&!sess) return redirect("/");
 
-        if (path_==="/api/auth/login"&&req.method==="POST") {
-            const body=await parseBody(req);
-            const result=auth.login(body.email||"",body.password||"");
-            if (result.error) return html(buildLoginPage(result.error));
-            const token=auth.createSession(result.user);
-            res.writeHead(302,{"Set-Cookie":`dbl_sess=${token}; Path=/; HttpOnly; SameSite=Lax`,"Location":"/?tab=dashboard"});res.end();return;
+        // Step 1: verify cookie, extract bot name, store pending
+        if (path_==="/api/entry/cookie"&&req.method==="POST") {
+            const body = await parseBody(req);
+            const raw = body.cookie||"";
+            if (!raw.trim()) return html(buildCookieEntryPage("Please paste your fbstate.json cookie.","","cookie"));
+            let parsed;
+            try { parsed = JSON.parse(raw); } catch(_) { return html(buildCookieEntryPage("Invalid JSON — please paste the raw fbstate.json array.","","cookie")); }
+            if (!Array.isArray(parsed)||!parsed.length) return html(buildCookieEntryPage("Cookie must be a non-empty JSON array.","","cookie"));
+            const cUser = parsed.find(c=>c.key==="c_user");
+            const fbUid = cUser ? cUser.value : "";
+            const botName = fbUid ? `FB_${fbUid}` : "FB_User";
+            // store cookie temporarily in a pending cookie (base64 encoded, limited to 4KB)
+            const pendingPayload = JSON.stringify({cookie: raw, botName});
+            const pending = Buffer.from(pendingPayload).toString("base64");
+            // If cookie is too large for a cookie, truncate gracefully
+            if (pending.length > 3900) return html(buildCookieEntryPage("Cookie data too large. Please use a shorter fbstate.json.","","cookie"));
+            res.writeHead(302,{
+                "Set-Cookie":`dbl_pending=${encodeURIComponent(pending)}; Path=/; HttpOnly; SameSite=Lax`,
+                "Location":"/entry/key",
+            });
+            return res.end();
         }
-        if (path_==="/api/auth/register"&&req.method==="POST") {
-            const body=await parseBody(req);
-            if (body.password!==body.confirm) return html(buildRegisterPage("Passwords do not match"));
-            const result=auth.register(body.username||"",body.email||"",body.password||"");
-            if (result.error) return html(buildRegisterPage(result.error));
-            const token=auth.createSession(result.user);
-            res.writeHead(302,{"Set-Cookie":`dbl_sess=${token}; Path=/; HttpOnly; SameSite=Lax`,"Location":"/?tab=dashboard"});res.end();return;
+
+        // Redirect to key step
+        if (path_==="/entry/key") {
+            const pendingRaw = (req.headers.cookie||"").match(/dbl_pending=([^;]+)/)?.[1];
+            if (!pendingRaw) return redirect("/");
+            let pending;
+            try { pending = JSON.parse(Buffer.from(decodeURIComponent(pendingRaw),"base64").toString()); } catch(_) { return redirect("/"); }
+            return html(buildCookieEntryPage("", pending.botName, "key"));
         }
+
+        // Step 2: validate license key, create session
+        if (path_==="/api/entry/key"&&req.method==="POST") {
+            const body = await parseBody(req);
+            const key = (body.licenseKey||"").trim();
+            const botNameFromForm = (body.botName||"").trim();
+            const pendingRaw = (req.headers.cookie||"").match(/dbl_pending=([^;]+)/)?.[1];
+            let cookieData = null;
+            if (pendingRaw) {
+                try { cookieData = JSON.parse(Buffer.from(decodeURIComponent(pendingRaw),"base64").toString()); } catch(_) {}
+            }
+            const validation = auth.validateKey(key);
+            if (validation.error) {
+                return html(buildCookieEntryPage(validation.error, botNameFromForm, "key"));
+            }
+            const botName = botNameFromForm || "User";
+            const cUser = cookieData?.cookie ? (() => { try { const arr=JSON.parse(cookieData.cookie); return arr.find(c=>c.key==="c_user"); } catch(_){return null;} })() : null;
+            const accountId = cUser ? cUser.value : null;
+            const userResult = auth.getOrCreateUserByKey(key, botName, accountId);
+            if (userResult.error) return html(buildCookieEntryPage(userResult.error, botName, "key"));
+            const userId = userResult.user.id;
+            // save cookie for this user
+            if (cookieData?.cookie) {
+                auth.ensureUserDataDir(userId);
+                const dest = path.join(uDir(userId), "fbstate.json");
+                try { fs.writeFileSync(dest, cookieData.cookie, "utf8"); } catch(_) {}
+                if (_cookieUpdateCb) _cookieUpdateCb(userId);
+            }
+            auth.updateUserInfo(userId, { ip: clientIP, userAgent });
+            const token = auth.createSession(userId, clientIP, userAgent);
+            if (!token) return html(buildCookieEntryPage("Session error — please try again.","","cookie"));
+            res.writeHead(302, {
+                "Set-Cookie": [
+                    `dbl_sess=${token}; Path=/; HttpOnly; SameSite=Lax`,
+                    `dbl_pending=; Path=/; HttpOnly; Max-Age=0`,
+                ],
+                "Location": userResult.isAdmin ? "/?tab=admin" : "/?tab=dashboard"
+            });
+            return res.end();
+        }
+
         if (path_==="/api/auth/logout"&&req.method==="POST") {
             const tok=getTokenFromReq(req);
             if(tok) auth.destroySession(tok);
-            res.writeHead(302,{"Set-Cookie":`dbl_sess=; Path=/; HttpOnly; Max-Age=0`,"Location":"/login"});res.end();return;
+            res.writeHead(302,{"Set-Cookie":`dbl_sess=; Path=/; HttpOnly; Max-Age=0`,"Location":"/"});res.end();return;
         }
 
-        if (!sess) return redirect("/login");
+        if (!sess) return redirect("/");
         auth.updateLastSeen(sess.userId);
         const uid=sess.userId;
 
+        // ─── MAIN DASHBOARD ───────────────────────────────────────────────
         if (path_==="/"&&req.method==="GET") {
             const mainTab=url_.searchParams.get("tab")||"dashboard";
             const innerTab=url_.searchParams.get("itab")||"overview";
             if (mainTab==="admin"&&!sess.isAdmin) return redirect("/?tab=dashboard");
-            if (!sess.isAdmin&&!hasCookieForUser(uid)) return html(buildCookieGatePage(sess));
-            if (sess.isAdmin&&!hasCookieForUser(uid)&&mainTab!=="admin"&&mainTab!=="about") return html(buildCookieGatePage(sess));
             return html(buildPage(sess,mainTab,innerTab));
         }
 
+        // ─── ADMIN ROUTES ─────────────────────────────────────────────────
         if (path_==="/admin/ban"&&req.method==="POST"&&sess.isAdmin)    { const body=await parseBody(req);auth.banUser(body.userId,body.reason||"");return redirect("/?tab=admin"); }
         if (path_==="/admin/unban"&&req.method==="POST"&&sess.isAdmin)  { const body=await parseBody(req);auth.unbanUser(body.userId);return redirect("/?tab=admin"); }
         if (path_==="/admin/delete"&&req.method==="POST"&&sess.isAdmin) { const body=await parseBody(req);auth.deleteUser(body.userId);return redirect("/?tab=admin"); }
+        if (path_==="/admin/generate-key"&&req.method==="POST"&&sess.isAdmin) {
+            const body=await parseBody(req);
+            auth.createLicenseKey(body.label||"");
+            return redirect("/?tab=admin");
+        }
+        if (path_==="/admin/revoke-key"&&req.method==="POST"&&sess.isAdmin) {
+            const body=await parseBody(req);
+            auth.revokeKey(body.key||"");
+            return redirect("/?tab=admin");
+        }
 
+        // ─── API ──────────────────────────────────────────────────────────
         if (path_==="/api/status")       { const us=getUserState(uid);return json({loggedIn:us.loggedIn,botName:us.botName,uptime:getUptime(uid),totalRepliesSent:us.totalRepliesSent}); }
         if (path_==="/api/hourly-stats") return json(getHourlyStats(uid));
         if (path_==="/api/alerts")       return json(getUserState(uid).alerts);
 
-        // Image upload (JSON body with base64)
+        // Temp mail API
+        if (path_==="/api/tempmail/generate"&&req.method==="POST") {
+            const result = await generateTempMail();
+            return json(result);
+        }
+        if (path_==="/api/tempmail/inbox"&&req.method==="GET") {
+            const token = url_.searchParams.get("token")||"";
+            if (!token) return json({error:"No token"});
+            const result = await getTempMailInbox(token);
+            return json(result);
+        }
+        if (path_==="/api/tempmail/message"&&req.method==="GET") {
+            const token = url_.searchParams.get("token")||"";
+            const id = url_.searchParams.get("id")||"";
+            if (!token||!id) return json({error:"Missing params"});
+            const result = await getTempMailMessage(token, id);
+            return json(result);
+        }
+
+        // Image upload
         if (path_==="/api/images/upload"&&req.method==="POST") {
             const body=await parseJsonBody(req);
-            const imgData=body.imageData||"";
-            const imgName=body.imageName||"photo";
+            const imgData=body.imageData||"";const imgName=body.imageName||"photo";
             if (!imgData.startsWith("data:image/")) return res.writeHead(400).end("Bad data");
-            const m=imgData.match(/^data:image\/(\w+);base64,(.+)$/s);
-            if (!m) return res.writeHead(400).end("Bad format");
-            const ext=m[1].toLowerCase().replace("jpeg","jpg");
-            const buf=Buffer.from(m[2],"base64");
-            const uploadsDir=path.join(uDir(uid),"uploads");
-            try{fs.mkdirSync(uploadsDir,{recursive:true});}catch(_){}
-            const safe=imgName.replace(/[^a-zA-Z0-9._-]/g,"_").slice(0,50);
-            const fname=`${Date.now()}_${safe}`;
+            const m=imgData.match(/^data:image\/(\w+);base64,(.+)$/s);if(!m)return res.writeHead(400).end("Bad format");
+            const ext=m[1].toLowerCase().replace("jpeg","jpg");const buf=Buffer.from(m[2],"base64");
+            const uploadsDir=path.join(uDir(uid),"uploads");try{fs.mkdirSync(uploadsDir,{recursive:true});}catch(_){}
+            const safe=imgName.replace(/[^a-zA-Z0-9._-]/g,"_").slice(0,50);const fname=`${Date.now()}_${safe}`;
             fs.writeFileSync(path.join(uploadsDir,fname),buf);
             res.writeHead(200,{"Content-Type":"application/json"});res.end(JSON.stringify({ok:true}));return;
         }
-        // Remove uploaded image file
         if (path_==="/api/images/file-remove"&&req.method==="POST") {
-            const body=await parseBody(req);
-            const filename=body.filename||"";
-            if (filename&&!filename.includes("..")&&!filename.includes("/")) {
-                try{fs.unlinkSync(path.join(uDir(uid),"uploads",filename));}catch(_){}
-            }
+            const body=await parseBody(req);const filename=body.filename||"";
+            if(filename&&!filename.includes("..")&&!filename.includes("/")){try{fs.unlinkSync(path.join(uDir(uid),"uploads",filename));}catch(_){}}
             return redirect("/?tab=dashboard&itab=messages");
         }
-        // Serve uploaded image
         if (path_==="/uploads"&&req.method==="GET") {
             const fn=url_.searchParams.get("file")||"";
-            if (!fn||fn.includes("..")||fn.includes("/")) return res.writeHead(404).end("Not found");
-            const fp=path.join(uDir(uid),"uploads",fn);
-            if (!fs.existsSync(fp)) return res.writeHead(404).end("Not found");
-            const ext=path.extname(fn).toLowerCase();
-            const mime={".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".gif":"image/gif",".webp":"image/webp"}[ext]||"image/jpeg";
-            res.writeHead(200,{"Content-Type":mime,"Cache-Control":"max-age=86400"});
-            fs.createReadStream(fp).pipe(res);return;
+            if(!fn||fn.includes("..")||fn.includes("/"))return res.writeHead(404).end("Not found");
+            const fp=path.join(uDir(uid),"uploads",fn);if(!fs.existsSync(fp))return res.writeHead(404).end("Not found");
+            const ext=path.extname(fn).toLowerCase();const mime={".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".gif":"image/gif",".webp":"image/webp"}[ext]||"image/jpeg";
+            res.writeHead(200,{"Content-Type":mime,"Cache-Control":"max-age=86400"});fs.createReadStream(fp).pipe(res);return;
         }
-        // Banner upload
         if (path_==="/api/banner/upload"&&req.method==="POST") {
-            const body=await parseJsonBody(req);
-            const bData=body.bannerData||"";
-            if (!bData.startsWith("data:image/")) return res.writeHead(400).end("Bad data");
-            const m=bData.match(/^data:image\/(\w+);base64,(.+)$/s);
-            if (!m) return res.writeHead(400).end("Bad format");
-            const buf=Buffer.from(m[2],"base64");
-            auth.ensureUserDataDir(uid);
+            const body=await parseJsonBody(req);const bData=body.bannerData||"";
+            if(!bData.startsWith("data:image/"))return res.writeHead(400).end("Bad data");
+            const m=bData.match(/^data:image\/(\w+);base64,(.+)$/s);if(!m)return res.writeHead(400).end("Bad format");
+            const buf=Buffer.from(m[2],"base64");auth.ensureUserDataDir(uid);
             fs.writeFileSync(path.join(uDir(uid),"banner_upload.jpg"),buf);
             res.writeHead(200,{"Content-Type":"application/json"});res.end(JSON.stringify({ok:true}));return;
         }
-        // Remove banner
-        if (path_==="/api/banner/remove"&&req.method==="POST") {
-            try{fs.unlinkSync(path.join(uDir(uid),"banner_upload.jpg"));}catch(_){}
-            return redirect("/?tab=dashboard&itab=config");
-        }
-        // Serve banner
+        if (path_==="/api/banner/remove"&&req.method==="POST") { try{fs.unlinkSync(path.join(uDir(uid),"banner_upload.jpg"));}catch(_){} return redirect("/?tab=dashboard&itab=config"); }
         if (path_==="/banner"&&req.method==="GET") {
-            const fp=path.join(uDir(uid),"banner_upload.jpg");
-            if (!fs.existsSync(fp)) return res.writeHead(404).end("No banner");
-            res.writeHead(200,{"Content-Type":"image/jpeg","Cache-Control":"no-cache"});
-            fs.createReadStream(fp).pipe(res);return;
+            const fp=path.join(uDir(uid),"banner_upload.jpg");if(!fs.existsSync(fp))return res.writeHead(404).end("No banner");
+            res.writeHead(200,{"Content-Type":"image/jpeg","Cache-Control":"no-cache"});fs.createReadStream(fp).pipe(res);return;
         }
 
-        // Toggle pre-made replies
         if (path_==="/api/config/toggle-prebuilt"&&req.method==="POST") {
-            const cfg=readBotConfig(uid);
-            cfg.useBuiltinReplies=cfg.useBuiltinReplies===false?true:false;
-            writeBotConfig(uid,cfg);
+            const cfg=readBotConfig(uid);cfg.useBuiltinReplies=cfg.useBuiltinReplies===false?true:false;writeBotConfig(uid,cfg);
             return redirect("/?tab=dashboard&itab=messages");
         }
 
-        // Replies
         if (path_==="/api/replies/add"&&req.method==="POST") {
             const body=await parseBody(req);if(body.word){const a=readCustomReplies(uid);a.push(body.word.trim());writeCustomReplies(uid,a);}
-            const tab=body.redirect||url_.searchParams.get("itab")||"messages";
-            return redirect(`/?tab=dashboard&itab=${tab}`);
+            return redirect(`/?tab=dashboard&itab=${body.redirect||"messages"}`);
         }
         if (path_==="/api/replies/remove"&&req.method==="POST") {
             const body=await parseBody(req);const a=readCustomReplies(uid);a.splice(parseInt(body.index),1);writeCustomReplies(uid,a);
-            const tab=body.redirect||url_.searchParams.get("itab")||"messages";
-            return redirect(`/?tab=dashboard&itab=${tab}`);
+            return redirect(`/?tab=dashboard&itab=${body.redirect||"messages"}`);
         }
 
-        // Config
         if (path_==="/api/config/save"&&req.method==="POST") {
             const body=await parseBody(req);const cfg=readBotConfig(uid);
             const num=(k,def)=>{const v=parseFloat(body[k]);return isNaN(v)?def:v;};
@@ -1364,12 +1527,11 @@ function startDashboard(port) {
             return redirect("/?tab=dashboard&itab=config");
         }
 
-        // Cookie
         if (path_==="/api/cookie/slot"&&req.method==="POST") {
             const body=await parseBody(req);const raw=body.cookie||"";
-            if(!raw.trim()) return redirect("/?tab=dashboard&itab=cookie");
+            if(!raw.trim())return redirect("/?tab=dashboard&itab=cookie");
             let parsed;try{parsed=JSON.parse(raw);}catch(_){return redirect("/?tab=dashboard&itab=cookie");}
-            if(!Array.isArray(parsed)||!parsed.length) return redirect("/?tab=dashboard&itab=cookie");
+            if(!Array.isArray(parsed)||!parsed.length)return redirect("/?tab=dashboard&itab=cookie");
             const slot=body.slot||"fbstate.json";
             const dest=path.join(uDir(uid),path.basename(slot).replace(/[^a-zA-Z0-9._-]/g,""));
             auth.ensureUserDataDir(uid);fs.writeFileSync(dest,JSON.stringify(parsed,null,2),"utf8");
@@ -1381,7 +1543,6 @@ function startDashboard(port) {
             return redirect("/?tab=dashboard&itab=cookie");
         }
 
-        // Custom commands
         if (path_==="/api/cmds/add"&&req.method==="POST") {
             const body=await parseBody(req);
             if(body.cmd&&body.reply){const a=readCustomCommands(uid);const cmd=body.cmd.startsWith("!")?body.cmd:"!"+body.cmd;a.push({cmd,reply:body.reply});writeCustomCommands(uid,a);}
@@ -1392,12 +1553,10 @@ function startDashboard(port) {
             return redirect("/?tab=dashboard&itab=cmds");
         }
 
-        // Whitelist
         if (path_==="/api/whitelist/toggle"&&req.method==="POST") { const w=readWhitelist(uid);w.enabled=!w.enabled;writeWhitelist(uid,w);return redirect("/?tab=dashboard&itab=threads"); }
         if (path_==="/api/whitelist/add"&&req.method==="POST")    { const body=await parseBody(req);if(body.uid){const w=readWhitelist(uid);if(!w.uids.includes(body.uid)){w.uids.push(body.uid);writeWhitelist(uid,w);}}return redirect("/?tab=dashboard&itab=threads"); }
         if (path_==="/api/whitelist/remove"&&req.method==="POST") { const body=await parseBody(req);if(body.uid){const w=readWhitelist(uid);w.uids=w.uids.filter(u=>u!==body.uid);writeWhitelist(uid,w);}return redirect("/?tab=dashboard&itab=threads"); }
 
-        // Thread controls
         if (path_==="/api/thread/config"&&req.method==="POST") {
             const body=await parseBody(req);
             if(body.threadID){const c=readThreadConfig(uid);c[body.threadID]={loopDelay:parseFloat(body.loopDelay)||null,loopReact:body.loopReact||null};writeThreadConfig(uid,c);}
@@ -1405,7 +1564,7 @@ function startDashboard(port) {
         }
         if (path_==="/api/thread/startloop"&&req.method==="POST") { const body=await parseBody(req);if(body.threadID&&_loopControlCb)_loopControlCb(uid,"start",body.threadID);return redirect("/?tab=dashboard&itab=threads"); }
         if (path_==="/api/thread/stoploop"&&req.method==="POST")  { const body=await parseBody(req);if(body.threadID&&_loopControlCb)_loopControlCb(uid,"stop",body.threadID);return redirect("/?tab=dashboard&itab=threads"); }
-        if (path_==="/api/thread/stopall"&&req.method==="POST")   {
+        if (path_==="/api/thread/stopall"&&req.method==="POST") {
             if(_stopAllCb)_stopAllCb(uid);
             const us=getUserState(uid);
             Object.keys(us.loopEnabled||{}).filter(t=>us.loopEnabled[t]).forEach(t=>{if(_loopControlCb)_loopControlCb(uid,"stop",t);});

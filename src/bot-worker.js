@@ -87,6 +87,8 @@ const pmThreads      = {};
 const spamTracker    = {};
 const settingBanner      = {};
 const settingGroupName   = {};
+const chatGptEnabled     = {};
+const lastBotMsgID       = {};
 
 function stopAllLoops(api) {
     const active = Object.keys(loopActive).filter(t => loopActive[t]);
@@ -594,6 +596,45 @@ function startBot() {
             }
 
             if (!message.startsWith(PREFIX)) {
+                if (chatGptEnabled[threadID] && senderID !== BOT_SELF_ID) {
+                    const repliedMid = event.messageReply && event.messageReply.messageID;
+                    const isReplyToBot = repliedMid && lastBotMsgID[threadID] && repliedMid === lastBotMsgID[threadID];
+                    const isDirectMsg = isPM;
+                    if (isReplyToBot || isDirectMsg) {
+                        const question = message.trim();
+                        if (question) {
+                            axios.post("https://api.openai.com/v1/chat/completions", {
+                                model: "gpt-3.5-turbo",
+                                messages: [{ role:"user", content: question }],
+                                max_tokens: 300,
+                            }, {
+                                headers: {
+                                    "Authorization": `Bearer ${process.env.OPENAI_API_KEY||""}`,
+                                    "Content-Type": "application/json"
+                                },
+                                timeout: 20000
+                            }).then(r => {
+                                const reply = r.data?.choices?.[0]?.message?.content || "I couldn't generate a response.";
+                                api.sendMessage(reply.trim(), threadID, (err, info) => {
+                                    if (!err && info) lastBotMsgID[threadID] = info.messageID;
+                                });
+                            }).catch(() => {
+                                const fallbacks = [
+                                    "Interesting question! I'm thinking...",
+                                    "That's a great point.",
+                                    "Let me think about that.",
+                                    "I'm not sure, but I'd say yes.",
+                                    "Can you tell me more about that?",
+                                ];
+                                const reply = fallbacks[Math.floor(Math.random()*fallbacks.length)];
+                                api.sendMessage(reply, threadID, (err, info) => {
+                                    if (!err && info) lastBotMsgID[threadID] = info.messageID;
+                                });
+                            });
+                        }
+                        return;
+                    }
+                }
                 if (isGroup&&sharedState.autoRespondEnabled[threadID]&&!sharedState.mutedThreads[threadID]) {
                     sendAutoReply(api,threadID);
                 }
@@ -731,6 +772,91 @@ function startBot() {
             if (cmd==="clap")    { const txt=args.slice(1).join(" ");if(!txt)return;api.sendMessage(txt.split(" ").join(" 👏 ")+" 👏",threadID,()=>{});return; }
             if (cmd==="timer")   { const sec=Math.max(1,Math.min(300,parseInt(args[1])||0));if(!sec)return;setTimeout(()=>api.sendMessage(`Timer: ${sec}s`,threadID,()=>{}),sec*1000);return; }
             if (cmd==="repeat")  { const n=parseInt(args[1]),txt=args.slice(2).join(" ");if(!n||!txt||n<1||n>10)return;api.sendMessage(Array(n).fill(txt).join("\n"),threadID,()=>{}); return; }
+
+            if (cmd==="mwa") {
+                const ip = args[1];
+                if (!ip) { api.sendMessage("Usage: !mwa <ip>", threadID, ()=>{}); return; }
+                axios.get(`http://ip-api.com/json/${encodeURIComponent(ip)}?fields=status,message,country,countryCode,region,regionName,city,zip,lat,lon,timezone,isp,org,as,asname,mobile,proxy,hosting,query`, { timeout: 10000 })
+                .then(r => {
+                    const d = r.data;
+                    if (d.status !== "success") { api.sendMessage(`IP lookup failed: ${d.message||"unknown error"}`, threadID, ()=>{}); return; }
+                    const flagEmoji = (d.countryCode||"").toUpperCase().replace(/./g, c => String.fromCodePoint(0x1F1E6 - 65 + c.charCodeAt(0)));
+                    const mapLink = `https://www.google.com/maps?q=${d.lat},${d.lon}`;
+                    const msg = [
+                        `🔍 IP SCAN RESULT`,
+                        `━━━━━━━━━━━━━━━━━━━━`,
+                        `📡 IP Address: ${d.query}`,
+                        `🌐 ISP: ${d.isp||"N/A"}`,
+                        `🏢 Organization: ${d.org||"N/A"}`,
+                        `📋 AS: ${d.as||"N/A"} (${d.asname||"N/A"})`,
+                        `━━━━━━━━━━━━━━━━━━━━`,
+                        `${flagEmoji} Country: ${d.country||"N/A"} (${d.countryCode||"N/A"})`,
+                        `🗺️ Region: ${d.regionName||"N/A"} (${d.region||"N/A"})`,
+                        `🏙️ City: ${d.city||"N/A"}`,
+                        `📮 ZIP Code: ${d.zip||"N/A"}`,
+                        `🕐 Timezone: ${d.timezone||"N/A"}`,
+                        `━━━━━━━━━━━━━━━━━━━━`,
+                        `📍 Coordinates: ${d.lat}, ${d.lon}`,
+                        `🗺️ Map: ${mapLink}`,
+                        `━━━━━━━━━━━━━━━━━━━━`,
+                        `📱 Mobile: ${d.mobile?"Yes":"No"}`,
+                        `🛡️ Proxy/VPN: ${d.proxy?"Yes":"No"}`,
+                        `🖥️ Hosting/DC: ${d.hosting?"Yes":"No"}`,
+                    ].join("\n");
+                    api.sendMessage(msg, threadID, ()=>{});
+                })
+                .catch(err => { api.sendMessage(`IP scan error: ${err.message}`, threadID, ()=>{}); });
+                return;
+            }
+
+            if (cmd==="scan") {
+                const profileUrl = args[1];
+                if (!profileUrl) { api.sendMessage("Usage: !scan <facebook profile url>", threadID, ()=>{}); return; }
+                api.sendMessage("Scanning profile... Please wait.", threadID, ()=>{});
+                axios.get(profileUrl, {
+                    timeout: 15000,
+                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" }
+                }).then(r => {
+                    const html = r.data || "";
+                    const getMatch = (regex) => { const m = html.match(regex); return m ? m[1] : null; };
+                    const currentName = getMatch(/<title>([^<]+)<\/title>/) || getMatch(/"name":"([^"]+)"/) || "N/A";
+                    const cleanName = currentName.replace(/ \| Facebook$/,"").replace(/ - Facebook$/,"").trim();
+                    const coverUrl = getMatch(/coverPhotoUrl":"([^"]+)"/) || getMatch(/"cover":{"source":"([^"]+)"/) || "N/A";
+                    const cleanCover = coverUrl !== "N/A" ? coverUrl.replace(/\\u002F/g,"/").replace(/\\/g,"") : "N/A";
+                    const relStatus = getMatch(/relationship_status":"([^"]+)"/) || getMatch(/relationshipStatus":"([^"]+)"/) || "N/A";
+                    const birthday = getMatch(/birthday_([^"]+)"/) || getMatch(/"birth_date":(\d+)/) || getMatch(/birthdate":"([^"]+)"/) || "N/A";
+                    const uid = getMatch(/"userID":"(\d+)"/) || getMatch(/"id":"(\d+)"/) || "N/A";
+                    const prevNames = [];
+                    const prevNameRegex = /"previousName":"([^"]+)"/g;
+                    let pm; while((pm = prevNameRegex.exec(html)) !== null) prevNames.push(pm[1]);
+                    const msg = [
+                        `🔍 FACEBOOK PROFILE SCAN`,
+                        `━━━━━━━━━━━━━━━━━━━━`,
+                        `👤 Current Name: ${cleanName}`,
+                        `📛 Previous Names: ${prevNames.length ? prevNames.join(", ") : "None found"}`,
+                        `💑 Relationship Status: ${relStatus}`,
+                        `🎂 Birthday: ${birthday}`,
+                        `━━━━━━━━━━━━━━━━━━━━`,
+                        `🆔 Profile ID: ${uid}`,
+                        `🔗 Profile URL: ${profileUrl}`,
+                        `🖼️ Cover Photo: ${cleanCover !== "N/A" ? cleanCover.slice(0,80)+"..." : "N/A"}`,
+                    ].join("\n");
+                    api.sendMessage(msg, threadID, ()=>{});
+                }).catch(err => { api.sendMessage(`Profile scan failed: ${err.message}`, threadID, ()=>{}); });
+                return;
+            }
+
+            if (cmd==="chatgpt") {
+                chatGptEnabled[threadID] = !chatGptEnabled[threadID];
+                if (chatGptEnabled[threadID]) {
+                    api.sendMessage("CHAT GPT MODE ON!", threadID, (err, info) => {
+                        if (!err && info) lastBotMsgID[threadID] = info.messageID;
+                    });
+                } else {
+                    api.sendMessage("Chat GPT mode disabled.", threadID, ()=>{});
+                }
+                return;
+            }
 
             if (cmd==="help") {
                 const h = [
