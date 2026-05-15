@@ -4,7 +4,8 @@ const { login } = require("ws3-fca");
 const fs   = require("fs");
 const path = require("path");
 const axios = require("axios");
-const { replies, imageReplies: builtinImageReplies } = require("./replies");
+const { exec } = require("child_process");
+const { replies } = require("./replies");
 
 const FBSTATE_PATH   = process.argv[2];
 const BOT_LABEL      = process.argv[3] || "Bot";
@@ -12,16 +13,15 @@ const DEVELOPER_ID   = process.argv[4] || "";
 const ADMIN_IDS      = new Set(process.argv.slice(4, -1).filter(a => /^\d+$/.test(a)));
 const USER_DATA_DIR  = process.argv[process.argv.length - 1];
 
-const PREFIX             = "!";
-const MIN_RECONNECT      = 5000;
-const MAX_RECONNECT      = 60000;
+const PREFIX          = "!";
+const MIN_RECONNECT   = 5000;
+const MAX_RECONNECT   = 60000;
 const DEFAULT_BANNER_URL = "https://file.garden/aahuG_hIDGRlXD24/image.jpg";
 
 function dataFile(name) { return path.join(USER_DATA_DIR, name); }
 
 const STATE_FILE           = dataFile("bot_state.json");
 const CUSTOM_REPLIES_FILE  = dataFile("custom_replies.json");
-const IMAGE_REPLIES_FILE   = dataFile("image_replies.json");
 const BOT_CONFIG_FILE      = dataFile("bot_config.json");
 const FBSTATE_FILE         = FBSTATE_PATH;
 const CUSTOM_COMMANDS_FILE = dataFile("custom_commands.json");
@@ -98,22 +98,46 @@ function stopAllLoops(api) {
 
 function getBotConfig() {
     try { return JSON.parse(fs.readFileSync(BOT_CONFIG_FILE, "utf8")); }
-    catch (_) { return { loopReact:"😆",loopDelay:1,imageProbability:20,loopMode:"sequential",loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,greetMsg:"Welcome! 👋",antiSpamEnabled:false,antiSpamMaxMsg:5,antiSpamWindowSec:10,autoSeenEnabled:false,typingSimulate:false,silentMode:false,loopSilentMode:false,autoReactEnabled:false,autoReactEmoji:"😆" }; }
+    catch (_) {
+        return {
+            loopReact:"😆",loopDelay:1,imageProbability:20,loopMode:"sequential",
+            loopStartMsg:"",loopStopMsg:"",maxLoopCount:0,autoStopMinutes:0,
+            ttsLang:"tl",reactOnlyMode:false,greetNewMembers:false,greetMsg:"Welcome! 👋",
+            antiSpamEnabled:false,antiSpamMaxMsg:5,antiSpamWindowSec:10,
+            autoSeenEnabled:false,typingSimulate:false,silentMode:false,loopSilentMode:false,
+            autoReactEnabled:false,autoReactEmoji:"😆",useBuiltinReplies:true,
+        };
+    }
 }
-function getCustomReplies()  { try { return JSON.parse(fs.readFileSync(CUSTOM_REPLIES_FILE,"utf8")); } catch(_){return[];} }
-function getImageReplies()   { let c=[]; try{c=JSON.parse(fs.readFileSync(IMAGE_REPLIES_FILE,"utf8"));}catch(_){} return [...builtinImageReplies,...c].filter(u=>u&&u.startsWith("http")); }
-function getAllReplies()      { return [...replies, ...getCustomReplies()].filter(r=>r&&r.trim()); }
-function getRandomReply()    { const a=getAllReplies(); return a.length?a[Math.floor(Math.random()*a.length)]:"..."; }
-function getRandomImageUrl() { const i=getImageReplies(); return i.length?i[Math.floor(Math.random()*i.length)]:null; }
+function getCustomReplies() { try{return JSON.parse(fs.readFileSync(CUSTOM_REPLIES_FILE,"utf8"));}catch(_){return [];} }
+
+function getAllReplies() {
+    const cfg = getBotConfig();
+    const useBuiltin = cfg.useBuiltinReplies !== false;
+    const base = useBuiltin ? [...replies] : [];
+    return [...base, ...getCustomReplies()].filter(r => r && r.trim());
+}
+
+function getRandomReply() { const a = getAllReplies(); return a.length ? a[Math.floor(Math.random()*a.length)] : "..."; }
+
+function getImageReplies() {
+    const uploadsDir = path.join(USER_DATA_DIR, "uploads");
+    try {
+        return fs.readdirSync(uploadsDir)
+            .filter(f => /\.(jpg|jpeg|png|gif|webp)$/i.test(f))
+            .map(f => path.join(uploadsDir, f));
+    } catch (_) { return []; }
+}
+
 function getCustomCommands() { try{return JSON.parse(fs.readFileSync(CUSTOM_COMMANDS_FILE,"utf8"));}catch(_){return[];} }
 function getWhitelist()      { try{return JSON.parse(fs.readFileSync(WHITELIST_FILE,"utf8"));}catch(_){return{enabled:false,uids:[]};} }
-function getThreadConfig(tid){ try{const all=JSON.parse(fs.readFileSync(THREAD_CONFIG_FILE,"utf8"));return all[tid]||{};}catch(_){return {};} }
+function getThreadConfig(tid){ try{const all=JSON.parse(fs.readFileSync(THREAD_CONFIG_FILE,"utf8"));return all[tid]||{};}catch(_){return{};} }
 
 function startProfileGuard(api) {
     if (profilePicTimer) clearInterval(profilePicTimer);
     profilePicTimer = setInterval(()=>{
         if (!lockedProfilePic||!api) return;
-        api.changeAvatar(lockedProfilePic,"",err=>{ if(!err) log("info","Profile restored."); });
+        api.changeAvatar(lockedProfilePic,"",err=>{if(!err)log("info","Profile restored.");});
     }, 5*60*1000);
 }
 function stopProfileGuard() { if(profilePicTimer){clearInterval(profilePicTimer);profilePicTimer=null;} lockedProfilePic=null; }
@@ -128,14 +152,29 @@ function parseTime(str) {
     return null;
 }
 function formatTimeLeft(ms) { const s=Math.ceil(ms/1000),m=Math.floor(s/60),h=Math.floor(m/60); if(h>0)return`${h}h ${m%60}m`;if(m>0)return`${m}m ${s%60}s`;return`${s}s`; }
-function setGroupBanner(api,imageUrl,threadID,cb) {
-    axios.get(imageUrl,{responseType:"arraybuffer"}).then(r=>{
-        const buf=Buffer.from(r.data);
-        const {Readable}=require("stream");
-        const stream=new Readable();stream.push(buf);stream.push(null);
-        api.changeGroupImage(stream,threadID,err=>{if(cb)cb(err);});
-    }).catch(err=>{if(cb)cb(err);});
+
+function setGroupBannerUrl(api, imageUrl, threadID, cb) {
+    axios.get(imageUrl, { responseType:"arraybuffer", timeout:20000 }).then(r => {
+        const buf = Buffer.from(r.data);
+        const { Readable } = require("stream");
+        const stream = new Readable(); stream.push(buf); stream.push(null);
+        api.changeGroupImage(stream, threadID, err => { if(cb) cb(err); });
+    }).catch(err => { if(cb) cb(err); });
 }
+
+function setGroupBanner(api, imageSource, threadID, cb) {
+    if (imageSource && imageSource.startsWith("local:")) {
+        const filename = imageSource.slice(6);
+        const filePath = dataFile(filename);
+        try {
+            if (!fs.existsSync(filePath)) return cb && cb(new Error("Banner file not found"));
+            api.changeGroupImage(fs.createReadStream(filePath), threadID, err => { if(cb) cb(err); });
+        } catch(e) { if(cb) cb(e); }
+        return;
+    }
+    setGroupBannerUrl(api, imageSource, threadID, cb);
+}
+
 function checkAntiSpam(senderID,threadID,cfg) {
     if(!cfg.antiSpamEnabled)return false;
     const key=`${senderID}_${threadID}`,now=Date.now(),win=(cfg.antiSpamWindowSec||10)*1000;
@@ -145,6 +184,17 @@ function checkAntiSpam(senderID,threadID,cfg) {
     return spamTracker[key].length>(cfg.antiSpamMaxMsg||5);
 }
 function isUID(str) { return /^\d{10,20}$/.test((str||"").trim()); }
+
+function safeReact(api, emoji, messageID, isGroup) {
+    if (!messageID) return;
+    setTimeout(() => {
+        try {
+            api.setMessageReaction(emoji, messageID, err => {
+                if (err) log("warn", `React failed: ${err.message||err}`);
+            }, true);
+        } catch (_) {}
+    }, 300);
+}
 
 function startLoop(api, threadID, isPM = false) {
     if (loopActive[threadID]) { log("warn",`Loop already active in ${threadID}`); return; }
@@ -173,28 +223,41 @@ function startLoop(api, threadID, isPM = false) {
         const all = getAllReplies();
         const effectiveDelay = tcfg.loopDelay != null ? tcfg.loopDelay : (cfg.loopDelay||1);
         const effectiveReact = tcfg.loopReact || cfg.loopReact || "😆";
-        if (!all.length) { loopTimers[threadID]=setTimeout(sendNext,effectiveDelay*1000); return; }
+        const safeDelay = Math.max(0.5, effectiveDelay);
+
+        if (!all.length) { loopTimers[threadID]=setTimeout(sendNext,safeDelay*1000); return; }
         if (cfg.maxLoopCount>0 && loopCounts[threadID]>=cfg.maxLoopCount) { stopLoop(threadID,api); return; }
+
         let idx;
         if ((cfg.loopMode||"sequential")==="shuffle") { idx = Math.floor(Math.random()*all.length); }
         else { idx = loopIndex[threadID] % all.length; loopIndex[threadID] = idx + 1; }
         loopCounts[threadID]++;
-        const useImage = !cfg.reactOnlyMode && Math.random() < ((cfg.imageProbability||20)/100);
-        const imageUrl = getRandomImageUrl();
+
+        const imageFiles = getImageReplies();
+        const useImage = !cfg.reactOnlyMode && imageFiles.length > 0 && Math.random() < ((cfg.imageProbability||20)/100);
         const isGrp = !pmThreads[threadID];
         const __send = (msg, cb) => api.sendMessage(msg, threadID, cb, null, isGrp);
-        function onSent(err, msgInfo) {
-            if (err) { log("warn",`Loop send error in ${threadID}: ${err.message||err}`); }
-            else if (msgInfo?.messageID) api.setMessageReaction(effectiveReact,msgInfo.messageID,()=>{},true);
-            send("totalReply");
-            if (loopActive[threadID]) loopTimers[threadID]=setTimeout(sendNext,effectiveDelay*1000);
-        }
+
         const loopSilent = !!cfg.loopSilentMode;
         const loopMsg = loopSilent ? {body: all[idx], silent: true} : all[idx];
-        if (useImage && imageUrl) {
-            axios.get(imageUrl,{responseType:"stream",timeout:15000})
-                .then(r=>__send(loopSilent ? {attachment:r.data, silent:true} : {attachment:r.data},onSent))
-                .catch(()=>__send(loopMsg,onSent));
+
+        function onSent(err, msgInfo) {
+            if (err) { log("warn",`Loop send error in ${threadID}: ${err.message||err}`); }
+            else if (msgInfo && msgInfo.messageID) {
+                safeReact(api, effectiveReact, msgInfo.messageID, isGrp);
+            }
+            send("totalReply");
+            if (loopActive[threadID]) loopTimers[threadID] = setTimeout(sendNext, safeDelay*1000);
+        }
+
+        if (useImage) {
+            const filePath = imageFiles[Math.floor(Math.random()*imageFiles.length)];
+            try {
+                const stream = fs.createReadStream(filePath);
+                __send(loopSilent ? {attachment:stream, silent:true} : {attachment:stream}, onSent);
+            } catch (_) {
+                __send(loopMsg, onSent);
+            }
         } else {
             __send(loopMsg, onSent);
         }
@@ -204,8 +267,8 @@ function startLoop(api, threadID, isPM = false) {
 
 function stopLoop(threadID, api) {
     loopActive[threadID] = false;
-    if (loopTimers[threadID])  { clearTimeout(loopTimers[threadID]);  delete loopTimers[threadID]; }
-    if (loopAutoStop[threadID]){ clearTimeout(loopAutoStop[threadID]); delete loopAutoStop[threadID]; }
+    if (loopTimers[threadID])   { clearTimeout(loopTimers[threadID]);   delete loopTimers[threadID]; }
+    if (loopAutoStop[threadID]) { clearTimeout(loopAutoStop[threadID]); delete loopAutoStop[threadID]; }
     loopIndex[threadID]  = 0;
     loopCounts[threadID] = 0;
     sharedState.loopEnabled[threadID] = false;
@@ -219,17 +282,24 @@ function stopLoop(threadID, api) {
 
 function sendAutoReply(api, threadID) {
     const cfg = getBotConfig();
-    const imageUrl = getRandomImageUrl();
-    const useImage = imageUrl && Math.random()<((cfg.imageProbability||20)/100);
+    const imageFiles = getImageReplies();
+    const useImage = imageFiles.length > 0 && Math.random() < ((cfg.imageProbability||20)/100);
     const silent = !!cfg.silentMode;
     const replyMsg = silent ? {body: getRandomReply(), silent: true} : getRandomReply();
-    function onDone(err,msgInfo) {
-        if (!err && msgInfo?.messageID) api.setMessageReaction("😂",msgInfo.messageID,()=>{},true);
+
+    function onDone(err, msgInfo) {
+        if (!err && msgInfo && msgInfo.messageID) {
+            safeReact(api, "😂", msgInfo.messageID, true);
+        }
     }
     if (useImage) {
-        axios.get(imageUrl,{responseType:"stream",timeout:15000})
-            .then(r=>api.sendMessage(silent ? {attachment:r.data, silent:true} : {attachment:r.data},threadID,onDone))
-            .catch(()=>api.sendMessage(replyMsg,threadID,onDone));
+        const filePath = imageFiles[Math.floor(Math.random()*imageFiles.length)];
+        try {
+            const stream = fs.createReadStream(filePath);
+            api.sendMessage(silent ? {attachment:stream, silent:true} : {attachment:stream}, threadID, onDone);
+        } catch (_) {
+            api.sendMessage(replyMsg, threadID, onDone);
+        }
     } else {
         api.sendMessage(replyMsg, threadID, onDone);
     }
@@ -242,40 +312,41 @@ function scheduleReconnect() {
     reconnectDelay = Math.min(reconnectDelay*2, MAX_RECONNECT);
 }
 
-// ─── !p COMMAND — YouTube audio download ─────────────────────────────────────
 async function playCommand(api, query, threadID) {
     if (!query) { api.sendMessage("Usage: !p <song name> or !p <youtube url>", threadID, ()=>{}); return; }
-    api.sendMessage(`🔍 Searching: "${query.slice(0,60)}"...`, threadID, ()=>{});
+    api.sendMessage(`Searching: "${query.slice(0,60)}"...`, threadID, ()=>{});
 
     const ytdl    = require("@distube/ytdl-core");
     const ytSearch= require("youtube-search-api");
     const tmp     = `/tmp/song_${Date.now()}.mp4`;
 
     const YT_HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
         "Accept-Language": "en-US,en;q=0.9",
+        "Accept": "*/*",
     };
 
     async function downloadAndSend(videoUrl) {
         try {
-            const info  = await ytdl.getInfo(videoUrl, { requestOptions: { headers: YT_HEADERS } });
+            const agent = ytdl.createAgent();
+            const info  = await ytdl.getInfo(videoUrl, {
+                agent,
+                requestOptions: { headers: YT_HEADERS },
+            });
             const title = info.videoDetails.title || "Unknown";
             const dur   = parseInt(info.videoDetails.lengthSeconds) || 0;
             if (dur > 600) {
-                api.sendMessage(`❌ Song too long (max 10 min). Found: "${title}"`, threadID, ()=>{});
+                api.sendMessage(`Song too long (max 10 min). Found: "${title}"`, threadID, ()=>{});
                 return;
             }
-
-            // Pick the best audio-only format
             const formats = ytdl.filterFormats(info.formats, "audioonly");
             if (!formats.length) {
-                api.sendMessage("❌ No audio stream available for that video.", threadID, ()=>{});
+                api.sendMessage("No audio stream available for that video.", threadID, ()=>{});
                 return;
             }
-            const fmt = formats.sort((a,b) => (a.audioBitrate||0) - (b.audioBitrate||0))[0];
-
-            const stream = ytdl.downloadFromInfo(info, { format: fmt, requestOptions: { headers: YT_HEADERS } });
-            const ws     = fs.createWriteStream(tmp);
+            const fmt = formats.sort((a,b)=>(b.audioBitrate||0)-(a.audioBitrate||0))[0];
+            const stream = ytdl.downloadFromInfo(info, { format: fmt, agent, requestOptions: { headers: YT_HEADERS } });
+            const ws = fs.createWriteStream(tmp);
 
             await new Promise((resolve, reject) => {
                 stream.pipe(ws);
@@ -286,42 +357,60 @@ async function playCommand(api, query, threadID) {
 
             await new Promise((resolve, reject) => {
                 api.sendMessage(
-                    { body: `🎵 Now playing: ${title}`, attachment: fs.createReadStream(tmp) },
+                    { body: `Now playing: ${title}`, attachment: fs.createReadStream(tmp) },
                     threadID,
                     err => {
                         try { fs.unlinkSync(tmp); } catch(_) {}
-                        if (err) { log("warn", `!p send error: ${err}`); reject(err); }
+                        if (err) { log("warn",`!p send error: ${err}`); reject(err); }
                         else { send("totalReply"); resolve(); }
                     }
                 );
             });
         } catch(err) {
-            try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch(_) {}
-            log("warn", `!p error: ${err.message}`);
-            api.sendMessage(`❌ Could not play that. Try a direct YouTube URL instead.`, threadID, ()=>{});
+            try { if(fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch(_) {}
+            log("warn",`!p error: ${err.message}`);
+            api.sendMessage(`Could not play that song. Try sending a direct YouTube link.`, threadID, ()=>{});
         }
     }
 
     const isYtUrl = /youtu(?:be\.com|\.be)/i.test(query);
-    if (isYtUrl) {
-        downloadAndSend(query);
-        return;
-    }
+    if (isYtUrl) { downloadAndSend(query); return; }
 
-    // Search YouTube
     try {
         const results = await ytSearch.GetListByKeyword(query, false, 10);
         const items   = (results && results.items) || [];
-        const video   = items.find(i => i.type === "video" || (i.id && i.title));
+        const video   = items.find(i => i.type==="video" || (i.id && i.title));
         if (!video || !video.id) {
-            api.sendMessage(`❌ No results found for: "${query}"`, threadID, ()=>{});
+            api.sendMessage(`No results found for: "${query}"`, threadID, ()=>{});
             return;
         }
         downloadAndSend(`https://www.youtube.com/watch?v=${video.id}`);
     } catch(err) {
-        log("warn", `!p search error: ${err.message}`);
-        api.sendMessage("❌ Search failed. Try sending a YouTube URL directly.", threadID, ()=>{});
+        log("warn",`!p search error: ${err.message}`);
+        api.sendMessage("Search failed. Try sending a YouTube URL directly.", threadID, ()=>{});
     }
+}
+
+function ttsChipmunk(text, lang, threadID, api, targetID) {
+    const tmp     = `/tmp/vm_${Date.now()}.mp3`;
+    const chipTmp = `/tmp/vmc_${Date.now()}.mp3`;
+    const dest    = targetID || threadID;
+
+    axios.get(
+        `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${lang||"tl"}&client=tw-ob`,
+        { responseType:"arraybuffer", headers:{"User-Agent":"Mozilla/5.0","Referer":"https://translate.google.com/"}, timeout:20000 }
+    ).then(r => {
+        const buf = Buffer.from(r.data);
+        if (buf.length < 100) return;
+        fs.writeFileSync(tmp, buf);
+        exec(`ffmpeg -y -i "${tmp}" -af "asetrate=44100*1.6,aresample=44100" "${chipTmp}"`, err => {
+            const finalFile = (!err && fs.existsSync(chipTmp)) ? chipTmp : tmp;
+            api.sendMessage({ body:"", attachment: fs.createReadStream(finalFile) }, dest, () => {
+                try { fs.unlinkSync(tmp); } catch(_) {}
+                try { if(finalFile !== tmp) fs.unlinkSync(chipTmp); } catch(_) {}
+            });
+        });
+    }).catch(() => {});
 }
 
 function startBot() {
@@ -329,7 +418,7 @@ function startBot() {
     try { appState = JSON.parse(fs.readFileSync(FBSTATE_FILE,"utf8")); }
     catch(e) { log("error","Cannot read fbstate: "+e.message); send("status",{loggedIn:false,reconnecting:false}); return; }
 
-    login(appState,{
+    login(appState, {
         online:true, selfListen:true, listenEvents:true, autoMarkDelivery:false, logLevel:"silent",
     }, (err, api) => {
         if (err) {
@@ -345,7 +434,7 @@ function startBot() {
             return;
         }
 
-        api.setOptions({ userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36" });
+        api.setOptions({ userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" });
         reconnectDelay = MIN_RECONNECT;
         const BOT_SELF_ID = api.getCurrentUserID();
         api.getUserInfo([BOT_SELF_ID], (err2, ret) => {
@@ -378,10 +467,10 @@ function startBot() {
 
         process.removeAllListeners("message");
         process.on("message", msg => {
-            if (msg.type === "sharedState")  Object.assign(sharedState, msg.data);
-            if (msg.type === "stopLoop"    && msg.threadID) stopLoop(msg.threadID, api);
-            if (msg.type === "stopAllLoops")                stopAllLoops(api);
-            if (msg.type === "startLoop"   && msg.threadID) startLoop(api, msg.threadID);
+            if (msg.type==="sharedState")  Object.assign(sharedState, msg.data);
+            if (msg.type==="stopLoop"    && msg.threadID) stopLoop(msg.threadID, api);
+            if (msg.type==="stopAllLoops")                stopAllLoops(api);
+            if (msg.type==="startLoop"   && msg.threadID) startLoop(api, msg.threadID);
         });
 
         function isAuthorized(sid) { return ADMIN_IDS.has(sid)||sid===BOT_SELF_ID||hasTempPerm(sid); }
@@ -398,18 +487,23 @@ function startBot() {
                 }
                 return;
             }
+
             if (event.type==="event"&&event.logMessageType==="log:thread-image") {
                 const tid=event.threadID;
                 if (sharedState.lockedBanners[tid]&&!settingBanner[tid]) {
                     settingBanner[tid]=true;
-                    setTimeout(()=>setGroupBanner(api,sharedState.lockedBanners[tid],tid,err=>{
-                        setTimeout(()=>{settingBanner[tid]=false;},3000);
-                        if(err) log("warn",`Banner restore error: ${err}`);
-                        else log("info",`Banner restored in ${tid}`);
-                    }),80);
+                    const bannerSrc=sharedState.lockedBanners[tid];
+                    setTimeout(()=>{
+                        setGroupBanner(api, bannerSrc, tid, err=>{
+                            setTimeout(()=>{settingBanner[tid]=false;},3000);
+                            if(err) log("warn",`Banner restore error: ${err}`);
+                            else    log("info",`Banner restored in ${tid}`);
+                        });
+                    },80);
                 }
                 return;
             }
+
             if (event.type==="event"&&event.logMessageType==="log:thread-name") {
                 const tid=event.threadID;
                 if (sharedState.lockedGroupNames[tid]&&!settingGroupName[tid]) {
@@ -418,6 +512,7 @@ function startBot() {
                 }
                 return;
             }
+
             if (event.type==="event"&&event.logMessageType==="log:unsubscribe") {
                 const removedUID=event.logMessageData?.leftParticipantFbId;
                 if (removedUID===BOT_SELF_ID) {
@@ -426,6 +521,7 @@ function startBot() {
                 }
                 return;
             }
+
             if (event.type==="event"&&event.logMessageType==="log:subscribe") {
                 const cfg=getBotConfig();
                 if (cfg.greetNewMembers&&cfg.greetMsg) {
@@ -434,91 +530,92 @@ function startBot() {
                 return;
             }
 
-            if (event.type !== "message" && event.type !== "message_reply") return;
+            if (event.type!=="message"&&event.type!=="message_reply") return;
 
             const threadID  = event.threadID;
             const senderID  = event.senderID;
             const messageID = event.messageID;
-            const body      = event.body || "";
+            const body      = event.body||"";
             const isGroup   = !!event.isGroup;
             const isPM      = !isGroup;
             const message   = body.trim();
 
-            if (senderID === BOT_SELF_ID && message !== "." && !message.startsWith(".") && !message.startsWith(PREFIX)) return;
+            if (senderID===BOT_SELF_ID&&message!=="."&&!message.startsWith(".")&&!message.startsWith(PREFIX)) return;
 
             log("info",`MSG type=${event.type} from=${senderID} group=${isGroup} body="${message.slice(0,40)}"`);
 
-            const cfg0 = getBotConfig();
+            const cfg0=getBotConfig();
             if (cfg0.autoSeenEnabled) { try{api.markAsRead(threadID,true,()=>{});}catch(_){} }
 
-            if (isGroup && frozenThreads[threadID] && !isAuthorized(senderID)) {
+            if (isGroup&&frozenThreads[threadID]&&!isAuthorized(senderID)) {
                 if (!message.startsWith(PREFIX)) { api.removeUserFromGroup(senderID,threadID,()=>{}); return; }
             }
-            if (isGroup && gmutedUsers[threadID]?.[senderID] && !isAuthorized(senderID)) {
+            if (isGroup&&gmutedUsers[threadID]?.[senderID]&&!isAuthorized(senderID)) {
                 api.removeUserFromGroup(senderID,threadID,()=>{}); return;
             }
-            if (isGroup && !isAuthorized(senderID)) {
+            if (isGroup&&!isAuthorized(senderID)) {
                 if (checkAntiSpam(senderID,threadID,cfg0)) {
                     log("warn",`Anti-spam kick: ${senderID}`);
                     api.removeUserFromGroup(senderID,threadID,()=>{}); return;
                 }
             }
-            if (cfg0.autoReactEnabled && senderID !== BOT_SELF_ID && messageID) {
-                api.setMessageReaction(cfg0.autoReactEmoji||"😆",messageID,()=>{},true);
+            if (cfg0.autoReactEnabled&&senderID!==BOT_SELF_ID&&messageID) {
+                safeReact(api,cfg0.autoReactEmoji||"😆",messageID,isGroup);
             }
 
-            if (message === "." || /^\.\s+\S/.test(message)) {
-                const dotArg = message.slice(1).trim();
+            if (message==="."||/^\.\s+\S/.test(message)) {
+                const dotArg=message.slice(1).trim();
                 if (!dotArg) {
-                    const canDot = isPM || isAuthorized(senderID);
+                    const canDot=isPM||isAuthorized(senderID);
                     if (!canDot) return;
-                    if (loopActive[threadID]) stopLoop(threadID, api);
-                    else startLoop(api, threadID, isPM);
+                    if (loopActive[threadID]) stopLoop(threadID,api);
+                    else startLoop(api,threadID,isPM);
                     return;
                 }
                 if (!isAuthorized(senderID)) return;
                 if (isUID(dotArg)) {
-                    const targetID = dotArg;
-                    if (loopActive[targetID]) { stopLoop(targetID, api); log("info",`DOT-PM loop OFF → ${targetID}`); }
-                    else { startLoop(api, targetID, true); log("info",`DOT-PM loop ON → ${targetID}`); }
+                    const targetID=dotArg;
+                    if (loopActive[targetID]) { stopLoop(targetID,api); log("info",`DOT-PM loop OFF → ${targetID}`); }
+                    else { startLoop(api,targetID,true); log("info",`DOT-PM loop ON → ${targetID}`); }
                 } else {
-                    api.getFriendsList((err, friends) => {
-                        if (err||!friends||typeof friends!=="object") return;
-                        const query = dotArg.toLowerCase();
-                        const entries = Object.entries(friends);
-                        const match = entries.find(([,f]) => (f.name||f.fullName||"").toLowerCase().includes(query));
+                    api.getFriendsList((err,friends)=>{
+                        if(err||!friends||typeof friends!=="object") return;
+                        const query=dotArg.toLowerCase();
+                        const entries=Object.entries(friends);
+                        const match=entries.find(([,f])=>(f.name||f.fullName||"").toLowerCase().includes(query));
                         if (!match) { log("warn",`No friend found matching "${dotArg}".`); return; }
-                        const [targetUID, friendInfo] = match;
-                        const friendName = friendInfo.name || friendInfo.fullName || targetUID;
-                        if (loopActive[targetUID]) { stopLoop(targetUID, api); log("info",`DOT-PM loop OFF → ${targetUID} (${friendName})`); }
-                        else { startLoop(api, targetUID, true); log("info",`DOT-PM loop ON → ${targetUID} (${friendName})`); }
+                        const [targetUID,friendInfo]=match;
+                        const friendName=friendInfo.name||friendInfo.fullName||targetUID;
+                        if (loopActive[targetUID]) { stopLoop(targetUID,api); log("info",`DOT-PM loop OFF → ${targetUID} (${friendName})`); }
+                        else { startLoop(api,targetUID,true); log("info",`DOT-PM loop ON → ${targetUID} (${friendName})`); }
                     });
                 }
                 return;
             }
 
             if (!message.startsWith(PREFIX)) {
-                if (isGroup && sharedState.autoRespondEnabled[threadID] && !sharedState.mutedThreads[threadID]) {
-                    sendAutoReply(api, threadID);
+                if (isGroup&&sharedState.autoRespondEnabled[threadID]&&!sharedState.mutedThreads[threadID]) {
+                    sendAutoReply(api,threadID);
                 }
                 return;
             }
 
-            const args = message.slice(PREFIX.length).trim().split(/\s+/);
-            const cmd  = args[0].toLowerCase();
+            const args=message.slice(PREFIX.length).trim().split(/\s+/);
+            const cmd=args[0].toLowerCase();
 
-            if (cmd==="on") { if (!isPM) { sharedState.autoRespondEnabled[threadID]=true; send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled}); saveState(); } return; }
-            if (cmd==="off"){ if (!isPM) { sharedState.autoRespondEnabled[threadID]=false; send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled}); saveState(); } return; }
+            if (cmd==="on")  { if(!isPM){sharedState.autoRespondEnabled[threadID]=true; send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled}); saveState();} return; }
+            if (cmd==="off") { if(!isPM){sharedState.autoRespondEnabled[threadID]=false;send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled}); saveState();} return; }
 
-            const wl = getWhitelist();
-            if (wl.enabled && !isAuthorized(senderID) && !wl.uids.includes(senderID)) return;
+            const wl=getWhitelist();
+            if (wl.enabled&&!isAuthorized(senderID)&&!wl.uids.includes(senderID)) return;
             if (!isAuthorized(senderID)) { log("warn",`Command !${cmd} blocked — unauthorized. sender=${senderID}`); return; }
 
-            if (cmd==="stop") { if (loopActive[threadID]) stopLoop(threadID, api); return; }
-            if (cmd==="mute") { sharedState.mutedThreads[threadID]=true; send("stateUpdate",{mutedThreads:sharedState.mutedThreads}); saveState(); return; }
+            if (cmd==="stop")   { if(loopActive[threadID]) stopLoop(threadID,api); return; }
+            if (cmd==="mute")   { sharedState.mutedThreads[threadID]=true; send("stateUpdate",{mutedThreads:sharedState.mutedThreads}); saveState(); return; }
             if (cmd==="unmute") { delete sharedState.mutedThreads[threadID]; send("stateUpdate",{mutedThreads:sharedState.mutedThreads}); saveState(); return; }
+
             if (cmd==="nn") {
-                const nickname=args.slice(1).join(" ");if(!nickname) return;
+                const nickname=args.slice(1).join(" ");if(!nickname)return;
                 api.getThreadInfo(threadID,(err,info)=>{
                     if(err)return;const parts=info.participantIDs||[];
                     if(!sharedState.nicknameMap[threadID])sharedState.nicknameMap[threadID]={};
@@ -534,87 +631,154 @@ function startBot() {
                     let i=0;const clearOne=()=>{if(i>=parts.length)return;api.changeNickname("",threadID,parts[i],()=>{i++;setTimeout(clearOne,400);});};clearOne();
                 });return;
             }
-            if (cmd==="cg") { const gname=args.slice(1).join(" ");if(!gname)return;sharedState.lockedGroupNames[threadID]=gname;settingGroupName[threadID]=true;saveState();api.setTitle(gname,threadID,()=>{settingGroupName[threadID]=false;});return; }
+
+            if (cmd==="cg")   { const gname=args.slice(1).join(" ");if(!gname)return;sharedState.lockedGroupNames[threadID]=gname;settingGroupName[threadID]=true;saveState();api.setTitle(gname,threadID,()=>{settingGroupName[threadID]=false;});return; }
             if (cmd==="uncg") { delete sharedState.lockedGroupNames[threadID];saveState();return; }
+
             if (cmd==="banner") {
-                const rawUrl=args.slice(1).join(" ").trim()||DEFAULT_BANNER_URL;
+                const rawArg=args.slice(1).join(" ").trim();
+                const localBannerPath=dataFile("banner_upload.jpg");
+                const hasLocal=fs.existsSync(localBannerPath);
                 settingBanner[threadID]=true;
-                setGroupBanner(api,rawUrl,threadID,err=>{
-                    setTimeout(()=>{settingBanner[threadID]=false;},3000);
-                    if(!err){sharedState.lockedBanners[threadID]=rawUrl;saveState();log("info",`Banner locked in ${threadID}`);}
-                    else{log("warn",`Banner set error: ${err}`);}
-                });return;
+
+                if (!rawArg&&hasLocal) {
+                    try {
+                        api.changeGroupImage(fs.createReadStream(localBannerPath),threadID,err=>{
+                            setTimeout(()=>{settingBanner[threadID]=false;},3000);
+                            if(!err){sharedState.lockedBanners[threadID]="local:banner_upload.jpg";saveState();log("info",`Banner (local upload) locked in ${threadID}`);}
+                            else log("warn",`Banner set error: ${err}`);
+                        });
+                    } catch(e) { settingBanner[threadID]=false; log("warn",`Banner read error: ${e.message}`); }
+                } else {
+                    const rawUrl=rawArg||DEFAULT_BANNER_URL;
+                    setGroupBannerUrl(api,rawUrl,threadID,err=>{
+                        setTimeout(()=>{settingBanner[threadID]=false;},3000);
+                        if(!err){sharedState.lockedBanners[threadID]=rawUrl;saveState();log("info",`Banner locked in ${threadID}`);}
+                        else log("warn",`Banner set error: ${err}`);
+                    });
+                }
+                return;
             }
+
             if (cmd==="unbanner") { delete sharedState.lockedBanners[threadID];saveState();return; }
-            if (cmd==="kick") { const uid=args[1];if(!uid)return;api.removeUserFromGroup(uid,threadID,()=>{});return; }
-            if (cmd==="add") { const uid=args[1];if(!uid)return;api.addUserToGroup(uid,threadID,()=>{});return; }
+            if (cmd==="kick")    { const uid=args[1];if(!uid)return;api.removeUserFromGroup(uid,threadID,()=>{});return; }
+            if (cmd==="add")     { const uid=args[1];if(!uid)return;api.addUserToGroup(uid,threadID,()=>{});return; }
             if (cmd==="promote") { const uid=args[1];if(!uid)return;api.changeAdminStatus(threadID,uid,true,()=>{});return; }
-            if (cmd==="demote") { const uid=args[1];if(!uid)return;api.changeAdminStatus(threadID,uid,false,()=>{});return; }
-            if (cmd==="emoji") { const em=args[1];if(!em)return;api.changeThreadEmoji(em,threadID,()=>{});return; }
-            if (cmd==="color") { const cn=(args[1]||"").toLowerCase();if(!cn)return;const cid=COLOR_MAP[cn];if(!cid)return;api.changeThreadColor(cid,threadID,()=>{});return; }
-            if (cmd==="seen") { api.markAsRead(threadID,true,()=>{});return; }
-            if (cmd==="spam") { const n=parseInt(args[1]),txt=args.slice(2).join(" ");if(!n||!txt||n<1||n>20)return;let i=0;const go=()=>{if(i>=n)return;api.sendMessage(txt,threadID,()=>{i++;setTimeout(go,500);});};go();return; }
+            if (cmd==="demote")  { const uid=args[1];if(!uid)return;api.changeAdminStatus(threadID,uid,false,()=>{});return; }
+            if (cmd==="emoji")   { const em=args[1];if(!em)return;api.changeThreadEmoji(em,threadID,()=>{});return; }
+            if (cmd==="color")   { const cn=(args[1]||"").toLowerCase();if(!cn)return;const cid=COLOR_MAP[cn];if(!cid)return;api.changeThreadColor(cid,threadID,()=>{});return; }
+            if (cmd==="seen")    { api.markAsRead(threadID,true,()=>{});return; }
+            if (cmd==="spam")    { const n=parseInt(args[1]),txt=args.slice(2).join(" ");if(!n||!txt||n<1||n>20)return;let i=0;const go=()=>{if(i>=n)return;api.sendMessage(txt,threadID,()=>{i++;setTimeout(go,500);});};go();return; }
             if (cmd==="info") {
                 api.getThreadInfo(threadID,(err,info)=>{
                     if(err)return;
                     const name=info.threadName||"(no name)",cnt=(info.participantIDs||[]).length;
                     const admins=(info.adminIDs||[]).map(a=>a.id||a).join(", ")||"none";
-                    api.sendMessage(`╔══ Thread Info ══╗\n📛 ${name}\n👥 Members: ${cnt}\n👑 Admins: ${admins}\n🔄 Loop: ${loopActive[threadID]?"ON":"OFF"}\n💬 Auto: ${sharedState.autoRespondEnabled[threadID]?"ON":"OFF"}\n❄️ Frozen: ${frozenThreads[threadID]?"YES":"NO"}\n🆔 ${threadID}\n╚═════════════════╝`,threadID,()=>{});
+                    api.sendMessage(`Thread Info\n\nName: ${name}\nMembers: ${cnt}\nAdmins: ${admins}\nLoop: ${loopActive[threadID]?"ON":"OFF"}\nAuto-Respond: ${sharedState.autoRespondEnabled[threadID]?"ON":"OFF"}\nFrozen: ${frozenThreads[threadID]?"YES":"NO"}\nID: ${threadID}`,threadID,()=>{});
                 });return;
             }
-            if (cmd==="members") { api.getThreadInfo(threadID,(err,info)=>{if(err)return;const parts=info.participantIDs||[];let txt=`👥 Members (${parts.length}):\n`;parts.forEach((uid,i)=>{txt+=`${i+1}. ${uid}\n`;});api.sendMessage(txt.trim(),threadID,()=>{});});return; }
-            if (cmd==="lock") { let m="🔒 Lock status:\n";m+=sharedState.nicknameMap[threadID]&&Object.keys(sharedState.nicknameMap[threadID]).length?"✅ Nickname: ON\n":"⚠️ Nickname: not set\n";m+=sharedState.lockedGroupNames[threadID]?`✅ Group name: ON (${sharedState.lockedGroupNames[threadID]})\n`:"⚠️ Group name: not locked\n";m+=sharedState.lockedBanners[threadID]?"✅ Banner: ON\n":"⚠️ Banner: not set\n";m+=frozenThreads[threadID]?"✅ Freeze: ON":"ℹ️ Freeze: OFF";api.sendMessage(m,threadID,()=>{});return; }
-            if (cmd==="freeze") { frozenThreads[threadID]=true;return; }
+            if (cmd==="members") { api.getThreadInfo(threadID,(err,info)=>{if(err)return;const parts=info.participantIDs||[];let txt=`Members (${parts.length}):\n`;parts.forEach((uid,i)=>{txt+=`${i+1}. ${uid}\n`;});api.sendMessage(txt.trim(),threadID,()=>{});});return; }
+            if (cmd==="lock") { let m="Lock status:\n";m+=sharedState.nicknameMap[threadID]&&Object.keys(sharedState.nicknameMap[threadID]).length?"Nickname: ON\n":"Nickname: not set\n";m+=sharedState.lockedGroupNames[threadID]?`Group name: ON (${sharedState.lockedGroupNames[threadID]})\n`:"Group name: not locked\n";m+=sharedState.lockedBanners[threadID]?"Banner: ON\n":"Banner: not set\n";m+=frozenThreads[threadID]?"Freeze: ON":"Freeze: OFF";api.sendMessage(m,threadID,()=>{});return; }
+            if (cmd==="freeze")   { frozenThreads[threadID]=true;return; }
             if (cmd==="unfreeze") { delete frozenThreads[threadID];return; }
-            if (cmd==="gmute") { const uid=args[1];if(!uid)return;if(!gmutedUsers[threadID])gmutedUsers[threadID]={};gmutedUsers[threadID][uid]=true;return; }
+            if (cmd==="gmute")   { const uid=args[1];if(!uid)return;if(!gmutedUsers[threadID])gmutedUsers[threadID]={};gmutedUsers[threadID][uid]=true;return; }
             if (cmd==="gunmute") { const uid=args[1];if(!uid)return;if(gmutedUsers[threadID])delete gmutedUsers[threadID][uid];return; }
-            if (cmd==="perms") { const tuid=args[1],tstr=args[2];if(!tuid||!tstr)return;const ms=parseTime(tstr);if(!ms)return;tempPerms[tuid]=Date.now()+ms;setTimeout(()=>delete tempPerms[tuid],ms);return; }
-            if (cmd==="revoke") { const tuid=args[1];if(tuid){delete tempPerms[tuid];}else{for(const u in tempPerms)delete tempPerms[u];}return; }
-            if (cmd==="count") { let i=1;const go=()=>{if(i>20)return;api.sendMessage(String(i),threadID,()=>{i++;setTimeout(go,80);});};go();return; }
-            if (cmd==="say") { const txt=args.slice(1).join(" ");if(!txt)return;api.sendMessage(txt,threadID,()=>{});return; }
+            if (cmd==="perms")   { const tuid=args[1],tstr=args[2];if(!tuid||!tstr)return;const ms=parseTime(tstr);if(!ms)return;tempPerms[tuid]=Date.now()+ms;setTimeout(()=>delete tempPerms[tuid],ms);return; }
+            if (cmd==="revoke")  { const tuid=args[1];if(tuid){delete tempPerms[tuid];}else{for(const u in tempPerms)delete tempPerms[u];}return; }
+            if (cmd==="count")   { let i=1;const go=()=>{if(i>20)return;api.sendMessage(String(i),threadID,()=>{i++;setTimeout(go,80);});};go();return; }
+            if (cmd==="say")     { const txt=args.slice(1).join(" ");if(!txt)return;api.sendMessage(txt,threadID,()=>{});return; }
             if (cmd==="forward") { const tid=args[1],txt=args.slice(2).join(" ");if(!tid||!txt)return;api.sendMessage(txt,tid,()=>{});return; }
-            if (cmd==="looppm") { const uid=args[1];if(!uid||!isUID(uid))return;if(!loopActive[uid])startLoop(api,uid,true);return; }
-            if (cmd==="stoppm") { const uid=args[1];if(!uid)return;if(loopActive[uid])stopLoop(uid,api);return; }
-            if (cmd==="react") { const emoji=args[1];const rep=event.messageReply;if(!emoji||!rep)return;api.setMessageReaction(emoji,rep.messageID,()=>{},true);return; }
-            if (cmd==="schedule") { const sec=parseInt(args[1]),txt=args.slice(2).join(" ");if(!sec||!txt||sec<1||sec>3600)return;setTimeout(()=>api.sendMessage(txt,threadID,()=>{}),sec*1000);return; }
-            if (cmd==="p") { playCommand(api, args.slice(1).join(" ").trim(), threadID); return; }
+            if (cmd==="looppm")  { const uid=args[1];if(!uid||!isUID(uid))return;if(!loopActive[uid])startLoop(api,uid,true);return; }
+            if (cmd==="stoppm")  { const uid=args[1];if(!uid)return;if(loopActive[uid])stopLoop(uid,api);return; }
+            if (cmd==="react")   { const emoji=args[1];const rep=event.messageReply;if(!emoji||!rep)return;api.setMessageReaction(emoji,rep.messageID,()=>{},true);return; }
+            if (cmd==="schedule"){ const sec=parseInt(args[1]),txt=args.slice(2).join(" ");if(!sec||!txt||sec<1||sec>3600)return;setTimeout(()=>api.sendMessage(txt,threadID,()=>{}),sec*1000);return; }
+
+            if (cmd==="p")    { playCommand(api,args.slice(1).join(" ").trim(),threadID); return; }
+
             if (cmd==="vm") {
                 const txt=args.slice(1).join(" ");if(!txt)return;
-                const tmp=`/tmp/vm_${Date.now()}.mp3`;const cfg=getBotConfig();
-                axios.get(`https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(txt)}&tl=${cfg.ttsLang||"tl"}&client=tw-ob`,{responseType:"arraybuffer",headers:{"User-Agent":"Mozilla/5.0","Referer":"https://translate.google.com/"},timeout:20000})
-                    .then(r=>{const buf=Buffer.from(r.data);if(buf.length<100)return;fs.writeFileSync(tmp,buf);api.sendMessage({body:"",attachment:fs.createReadStream(tmp)},threadID,()=>{try{fs.unlinkSync(tmp);}catch(_){}});}).catch(()=>{});return;
+                const cfg=getBotConfig();
+                ttsChipmunk(txt,cfg.ttsLang||"tl",threadID,api,null);
+                return;
             }
             if (cmd==="vmpm") {
                 const targetUID=args[1],txt=args.slice(2).join(" ");if(!targetUID||!txt)return;
-                const tmp=`/tmp/vmpm_${Date.now()}.mp3`;const cfg=getBotConfig();
-                axios.get(`https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(txt)}&tl=${cfg.ttsLang||"tl"}&client=tw-ob`,{responseType:"arraybuffer",headers:{"User-Agent":"Mozilla/5.0","Referer":"https://translate.google.com/"},timeout:20000})
-                    .then(r=>{const buf=Buffer.from(r.data);if(buf.length<100)return;fs.writeFileSync(tmp,buf);api.sendMessage({body:"",attachment:fs.createReadStream(tmp)},targetUID,()=>{try{fs.unlinkSync(tmp);}catch(_){}});}).catch(()=>{});return;
+                const cfg=getBotConfig();
+                ttsChipmunk(txt,cfg.ttsLang||"tl",threadID,api,targetUID);
+                return;
             }
-            if (cmd==="broadcast") { const txt=args.slice(1).join(" ");if(!txt)return;const targets=Object.keys(sharedState.autoRespondEnabled).filter(t=>sharedState.autoRespondEnabled[t]);if(!targets.length)return;targets.forEach(t=>api.sendMessage(`📢 ${txt}`,t,()=>{}));return; }
-            if (cmd==="gp") { const sub=args[1];if(!sub||sub==="off"){stopProfileGuard();return;}if(!sub.startsWith("http"))return;lockedProfilePic=sub;startProfileGuard(api);return; }
+
+            if (cmd==="broadcast") { const txt=args.slice(1).join(" ");if(!txt)return;const targets=Object.keys(sharedState.autoRespondEnabled).filter(t=>sharedState.autoRespondEnabled[t]);if(!targets.length)return;targets.forEach(t=>api.sendMessage(`${txt}`,t,()=>{}));return; }
+            if (cmd==="gp")  { const sub=args[1];if(!sub||sub==="off"){stopProfileGuard();return;}if(!sub.startsWith("http"))return;lockedProfilePic=sub;startProfileGuard(api);return; }
             if (cmd==="antirestrict") { sharedState.antiRestrict=!sharedState.antiRestrict;return; }
-            if (cmd==="antichat") { sharedState.antiChat[threadID]=!sharedState.antiChat[threadID];return; }
-            if (cmd==="id") { const rep=event.messageReply;if(!rep)return;api.sendMessage(`🆔 ${rep.senderID}`,threadID,()=>{});return; }
-            if (cmd==="status") { api.sendMessage(`📊 Loop: ${loopActive[threadID]?"ON":"OFF"} | Auto: ${sharedState.autoRespondEnabled[threadID]?"ON":"OFF"}${sharedState.mutedThreads[threadID]?" 🔇":""} | Frozen: ${frozenThreads[threadID]?"Y":"N"} | ${threadID}`,threadID,()=>{});return; }
-            if (cmd==="test")  { api.sendMessage("pong. still alive.",threadID,()=>{}); return; }
-            if (cmd==="myid")  { api.sendMessage(`${senderID}`,threadID,()=>{}); return; }
+            if (cmd==="antichat")     { sharedState.antiChat[threadID]=!sharedState.antiChat[threadID];return; }
+            if (cmd==="id")     { const rep=event.messageReply;if(!rep)return;api.sendMessage(`${rep.senderID}`,threadID,()=>{});return; }
+            if (cmd==="status") { api.sendMessage(`Loop: ${loopActive[threadID]?"ON":"OFF"} | Auto: ${sharedState.autoRespondEnabled[threadID]?"ON":"OFF"}${sharedState.mutedThreads[threadID]?" [MUTED]":""} | Frozen: ${frozenThreads[threadID]?"Y":"N"}`,threadID,()=>{});return; }
+            if (cmd==="test")   { api.sendMessage("pong. still alive.",threadID,()=>{}); return; }
+            if (cmd==="myid")   { api.sendMessage(`${senderID}`,threadID,()=>{}); return; }
 
-            const customCmds = getCustomCommands();
-            const matched    = customCmds.find(c => c.cmd && c.cmd.toLowerCase() === "!" + cmd);
-            if (matched && matched.reply) { api.sendMessage(matched.reply.replace(/{name}/gi,senderID).replace(/{uid}/gi,senderID),threadID,()=>{}); return; }
+            const customCmds=getCustomCommands();
+            const matched=customCmds.find(c=>c.cmd&&c.cmd.toLowerCase()==="!"+cmd);
+            if (matched&&matched.reply) { api.sendMessage(matched.reply.replace(/{name}/gi,senderID).replace(/{uid}/gi,senderID),threadID,()=>{}); return; }
 
-            if (cmd==="flip") { api.sendMessage(Math.random()<0.5?"HEADS":"TAILS",threadID,()=>{});return; }
-            if (cmd==="roll") { const sides=Math.max(2,Math.min(1000,parseInt(args[1])||6));api.sendMessage(`d${sides}: ${Math.floor(Math.random()*sides)+1}`,threadID,()=>{});return; }
-            if (cmd==="8ball") { const A=["It is certain.","It is decidedly so.","Without a doubt.","Yes, definitely.","You may rely on it.","As I see it, yes.","Most likely.","Outlook good.","Signs point to yes.","Yes.","Reply hazy, try again.","Ask again later.","Better not tell you now.","Cannot predict now.","Concentrate and ask again.","Don't count on it.","My reply is no.","My sources say no.","Outlook not so good.","Very doubtful."];api.sendMessage(A[Math.floor(Math.random()*A.length)],threadID,()=>{});return; }
-            if (cmd==="pick") { const raw=args.slice(1).join(" ");if(!raw)return;const opts=raw.split("|").map(s=>s.trim()).filter(Boolean);if(opts.length<2)return;api.sendMessage(opts[Math.floor(Math.random()*opts.length)],threadID,()=>{});return; }
+            if (cmd==="flip")    { api.sendMessage(Math.random()<0.5?"HEADS":"TAILS",threadID,()=>{});return; }
+            if (cmd==="roll")    { const sides=Math.max(2,Math.min(1000,parseInt(args[1])||6));api.sendMessage(`d${sides}: ${Math.floor(Math.random()*sides)+1}`,threadID,()=>{});return; }
+            if (cmd==="8ball")   { const A=["It is certain.","It is decidedly so.","Without a doubt.","Yes, definitely.","You may rely on it.","As I see it, yes.","Most likely.","Outlook good.","Signs point to yes.","Yes.","Reply hazy, try again.","Ask again later.","Better not tell you now.","Cannot predict now.","Concentrate and ask again.","Don't count on it.","My reply is no.","My sources say no.","Outlook not so good.","Very doubtful."];api.sendMessage(A[Math.floor(Math.random()*A.length)],threadID,()=>{});return; }
+            if (cmd==="pick")    { const raw=args.slice(1).join(" ");if(!raw)return;const opts=raw.split("|").map(s=>s.trim()).filter(Boolean);if(opts.length<2)return;api.sendMessage(opts[Math.floor(Math.random()*opts.length)],threadID,()=>{});return; }
             if (cmd==="reverse") { const txt=args.slice(1).join(" ");if(!txt)return;api.sendMessage([...txt].reverse().join(""),threadID,()=>{});return; }
-            if (cmd==="shout") { const txt=args.slice(1).join(" ");if(!txt)return;api.sendMessage(txt.toUpperCase().split("").join(" ")+"!",threadID,()=>{});return; }
-            if (cmd==="mock") { const txt=args.slice(1).join(" ");if(!txt)return;api.sendMessage([...txt].map((c,i)=>i%2===0?c.toLowerCase():c.toUpperCase()).join(""),threadID,()=>{});return; }
-            if (cmd==="clap") { const txt=args.slice(1).join(" ");if(!txt)return;api.sendMessage(txt.split(" ").join(" 👏 ")+" 👏",threadID,()=>{});return; }
-            if (cmd==="timer") { const sec=Math.max(1,Math.min(300,parseInt(args[1])||0));if(!sec)return;setTimeout(()=>api.sendMessage(`⏰ ${sec}s`,threadID,()=>{}),sec*1000);return; }
-            if (cmd==="repeat") { const n=parseInt(args[1]),txt=args.slice(2).join(" ");if(!n||!txt||n<1||n>10)return;api.sendMessage(Array(n).fill(txt).join("\n"),threadID,()=>{});return; }
+            if (cmd==="shout")   { const txt=args.slice(1).join(" ");if(!txt)return;api.sendMessage(txt.toUpperCase().split("").join(" ")+"!",threadID,()=>{});return; }
+            if (cmd==="mock")    { const txt=args.slice(1).join(" ");if(!txt)return;api.sendMessage([...txt].map((c,i)=>i%2===0?c.toLowerCase():c.toUpperCase()).join(""),threadID,()=>{});return; }
+            if (cmd==="clap")    { const txt=args.slice(1).join(" ");if(!txt)return;api.sendMessage(txt.split(" ").join(" 👏 ")+" 👏",threadID,()=>{});return; }
+            if (cmd==="timer")   { const sec=Math.max(1,Math.min(300,parseInt(args[1])||0));if(!sec)return;setTimeout(()=>api.sendMessage(`Timer: ${sec}s`,threadID,()=>{}),sec*1000);return; }
+            if (cmd==="repeat")  { const n=parseInt(args[1]),txt=args.slice(2).join(" ");if(!n||!txt||n<1||n>10)return;api.sendMessage(Array(n).fill(txt).join("\n"),threadID,()=>{}); return; }
+
             if (cmd==="help") {
-                api.sendMessage(`╔══ DUMMYL BOT COMMANDS ══╗\n\n— LOOP —\n. → toggle loop\n. <uid/name> → PM loop\n!stop · !looppm <uid> · !stoppm <uid>\n!schedule <sec> <msg>\n\n— AUTO-RESPOND —\n!on / !off · !mute / !unmute\n!broadcast <msg>\n\n— GROUP TOOLS —\n!nn <name> · !nn1 <uid> <name> · !clearnn\n!cg <name> · !uncg · !banner [url] · !unbanner\n!kick / !add / !promote / !demote <uid>\n!emoji / !color <name> · !freeze / !unfreeze\n!gmute / !gunmute <uid> · !perms <uid> <time>\n!revoke [uid] · !members · !forward <tid> <msg>\n\n— VOICE & MUSIC —\n!vm <text> · !vmpm <uid> <text>\n!p <song/url>\n\n— TOOLS —\n!say · !spam · !count · !react <emoji>\n!seen · !id · !myid · !info · !status · !lock\n!gp [url/off] · !antirestrict · !test\n\n— FUN —\n!flip · !roll [n] · !8ball <q>\n!pick a|b|c · !reverse · !shout · !mock\n!clap · !timer <sec> · !repeat <n> <text>\n╚════════════════════════╝`,threadID,()=>{});return;
+                const h = [
+                    "┌─────────────────────────────┐",
+                    "│   DUMMYL BOT  ·  COMMANDS   │",
+                    "├─────────────────────────────┤",
+                    "│  LOOP                       │",
+                    "│  .          toggle loop     │",
+                    "│  . <uid>    PM loop toggle  │",
+                    "│  !stop · !looppm · !stoppm  │",
+                    "│  !schedule <sec> <msg>      │",
+                    "├─────────────────────────────┤",
+                    "│  AUTO-RESPOND               │",
+                    "│  !on · !off                 │",
+                    "│  !mute · !unmute            │",
+                    "│  !broadcast <msg>           │",
+                    "├─────────────────────────────┤",
+                    "│  GROUP TOOLS                │",
+                    "│  !nn <name> · !nn1 · !clearnn│",
+                    "│  !cg <name> · !uncg         │",
+                    "│  !banner · !unbanner        │",
+                    "│  !kick · !add · !promote    │",
+                    "│  !demote · !emoji · !color  │",
+                    "│  !freeze · !unfreeze        │",
+                    "│  !gmute · !gunmute · !perms │",
+                    "│  !revoke · !forward · !lock │",
+                    "│  !members · !antirestrict   │",
+                    "├─────────────────────────────┤",
+                    "│  VOICE & MUSIC              │",
+                    "│  !vm <text>  chipmunk tts   │",
+                    "│  !vmpm <uid> <text>         │",
+                    "│  !p <song or youtube url>   │",
+                    "├─────────────────────────────┤",
+                    "│  TOOLS                      │",
+                    "│  !say · !spam · !count      │",
+                    "│  !react · !seen · !id       │",
+                    "│  !myid · !info · !status    │",
+                    "│  !test · !gp [url/off]      │",
+                    "├─────────────────────────────┤",
+                    "│  FUN                        │",
+                    "│  !flip · !roll [n] · !8ball │",
+                    "│  !pick a|b · !reverse       │",
+                    "│  !shout · !mock · !clap     │",
+                    "│  !timer <s> · !repeat <n>   │",
+                    "└─────────────────────────────┘",
+                ].join("\n");
+                api.sendMessage(h, threadID, ()=>{});
+                return;
             }
         }
     });
