@@ -6,8 +6,8 @@ const path = require("path");
 const axios = require("axios");
 const { exec } = require("child_process");
 const { replies } = require("./replies");
-const ytdl     = require("@distube/ytdl-core");
-const ytSearch = require("youtube-search-api");
+const { handleTempMail }      = require("./tempmail");
+const { toggleProfileGuard }  = require("./profileguard");
 
 const FBSTATE_PATH   = process.argv[2];
 const BOT_LABEL      = process.argv[3] || "Bot";
@@ -318,40 +318,53 @@ function scheduleReconnect() {
     reconnectDelay = Math.min(reconnectDelay*2, MAX_RECONNECT);
 }
 
+async function yt1sSearch(query) {
+    const isUrl = /youtu(?:be\.com|\.be)/i.test(query);
+    const q     = isUrl ? query : query;
+    const API   = "https://yt1s.com/api";
+
+    const search = await axios.post(`${API}/ajaxSearch/index`,
+        `q=${encodeURIComponent(q)}&vt=mp3`,
+        { timeout: 20000 }
+    );
+    const { vid, links, mess, t: title } = search.data;
+    if (mess) throw new Error(mess || "No results found.");
+    if (!vid || !links || !links.mp3) throw new Error("No audio links returned.");
+
+    const type     = links.mp3;
+    const typeKeys = Object.keys(type);
+    if (!typeKeys.length) throw new Error("No quality options found.");
+    const hq = typeKeys[typeKeys.length - 1];
+    const k  = type[hq].k;
+
+    const convert = await axios.post(`${API}/ajaxConvert/convert`,
+        `vid=${vid}&k=${k}`,
+        { timeout: 30000 }
+    );
+    const { dlink, title: convTitle, c_status } = convert.data;
+    if (!dlink) throw new Error("Conversion failed, no download link.");
+
+    return { title: convTitle || title || query, downloadUrl: dlink };
+}
+
 function playCommand(api, query, threadID) {
     if (!query) { api.sendMessage("Usage: !p <song name or YouTube URL>", threadID, ()=>{}); return; }
     api.sendMessage(`Searching: "${query.slice(0,60)}"...`, threadID, ()=>{});
 
-    async function run() {
-        let url   = query.trim();
-        let title = query;
-        const isUrl = /youtu(?:be\.com|\.be)/i.test(url);
-
-        if (!isUrl) {
-            const res = await ytSearch.GetListByKeyword(query, false, 1);
-            if (!res || !res.items || !res.items.length) throw new Error("No results found.");
-            url   = `https://www.youtube.com/watch?v=${res.items[0].id}`;
-            title = res.items[0].title || query;
-        } else {
-            try {
-                const info = await ytdl.getInfo(url);
-                title = info.videoDetails.title || query;
-            } catch (_) {}
-        }
-
-        const stream = ytdl(url, { filter: "audioonly", quality: "highestaudio" });
+    yt1sSearch(query).then(({ title, downloadUrl }) => {
+        return axios.get(downloadUrl, { responseType: "stream", timeout: 60000 });
+    }).then(dlRes => {
+        const titleForMsg = query.slice(0, 60);
         api.sendMessage(
-            { body: `Now playing: ${title}`, attachment: stream },
+            { body: `Now playing: ${titleForMsg}`, attachment: dlRes.data },
             threadID,
             (err) => {
                 if (err) log("warn", `!p send error: ${err}`);
                 else send("totalReply");
             }
         );
-    }
-
-    run().catch(e => {
-        api.sendMessage(`Failed to play. ${e.message || "Try a direct YouTube URL."}`, threadID, ()=>{});
+    }).catch(e => {
+        api.sendMessage(`Failed to play. ${e.message || "Try a different song or direct YouTube URL."}`, threadID, ()=>{});
         log("warn", `!p error: ${e.message}`);
     });
 }
@@ -418,10 +431,9 @@ function startBot() {
         api.setOptions({ userAgent: selectedUA });
         log("info", "Account protection: ON | Anti-automation: ACTIVE");
         if (sharedState.profileGuardEnabled) {
-            api.setProfileGuard(true, err => {
-                if (!err) log("info", "Profile guard restored.");
-                else log("warn", `Profile guard restore error: ${err}`);
-            });
+            toggleProfileGuard(FBSTATE_FILE, true)
+                .then(() => log("info", "Profile guard restored."))
+                .catch(e => log("warn", `Profile guard restore error: ${e.message}`));
         }
         reconnectDelay = MIN_RECONNECT;
         const BOT_SELF_ID = api.getCurrentUserID();
@@ -459,10 +471,13 @@ function startBot() {
             if (msg.type==="stopAllLoops")                stopAllLoops(api);
             if (msg.type==="startLoop"   && msg.threadID) startLoop(api, msg.threadID);
             if (msg.type==="setProfileGuard") {
-                api.setProfileGuard(!!msg.enabled, err => {
-                    if (!err) { sharedState.profileGuardEnabled = !!msg.enabled; saveState(); }
-                    log("info", `Profile guard ${msg.enabled ? "enabled" : "disabled"}${err ? " (error: "+err+")" : ""}.`);
-                });
+                toggleProfileGuard(FBSTATE_FILE, !!msg.enabled)
+                    .then(() => {
+                        sharedState.profileGuardEnabled = !!msg.enabled;
+                        saveState();
+                        log("info", `Profile guard ${msg.enabled ? "enabled" : "disabled"}.`);
+                    })
+                    .catch(e => log("warn", `Profile guard toggle error: ${e.message}`));
             }
         });
 
@@ -743,19 +758,21 @@ function startBot() {
             if (cmd==="broadcast") { const txt=args.slice(1).join(" ");if(!txt)return;const targets=Object.keys(sharedState.autoRespondEnabled).filter(t=>sharedState.autoRespondEnabled[t]);if(!targets.length)return;targets.forEach(t=>api.sendMessage(`${txt}`,t,()=>{}));return; }
             if (cmd==="gp")  {
                 const sub=(args[1]||"").toLowerCase();
-                if (!sub || sub==="off") {
-                    api.setProfileGuard(false, err => {
-                        if (!err) { sharedState.profileGuardEnabled=false; saveState(); }
-                        api.sendMessage(!err ? "Profile guard disabled." : "Failed to disable guard.", threadID, ()=>{});
+                const enable = !(!sub || sub==="off");
+                api.sendMessage(`Turning profile guard ${enable ? "ON" : "OFF"}...`, threadID, ()=>{});
+                toggleProfileGuard(FBSTATE_FILE, enable)
+                    .then(() => {
+                        sharedState.profileGuardEnabled = enable;
+                        saveState();
+                        api.sendMessage(enable ? "Profile guard enabled. Your account is now shielded." : "Profile guard disabled.", threadID, ()=>{});
+                    })
+                    .catch(e => {
+                        api.sendMessage(`Failed to toggle profile guard: ${e.message}`, threadID, ()=>{});
                     });
-                } else {
-                    api.setProfileGuard(true, err => {
-                        if (!err) { sharedState.profileGuardEnabled=true; saveState(); }
-                        api.sendMessage(!err ? "Profile guard enabled. Your account is now shielded." : "Failed to enable guard: "+err, threadID, ()=>{});
-                    });
-                }
                 return;
             }
+            if (cmd==="tempmail") { handleTempMail(api, args, threadID); return; }
+
             if (cmd==="antirestrict") { sharedState.antiRestrict=!sharedState.antiRestrict;return; }
             if (cmd==="antichat")     { sharedState.antiChat[threadID]=!sharedState.antiChat[threadID];return; }
             if (cmd==="id")     { const rep=event.messageReply;if(!rep)return;api.sendMessage(`${rep.senderID}`,threadID,()=>{});return; }
