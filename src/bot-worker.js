@@ -16,6 +16,16 @@ const USER_DATA_DIR  = process.argv[process.argv.length - 1];
 const PREFIX          = "!";
 const MIN_RECONNECT   = 5000;
 const MAX_RECONNECT   = 60000;
+
+const USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+];
+function getRandomUA() { return USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)]; }
 const DEFAULT_BANNER_URL = "https://file.garden/aahuG_hIDGRlXD24/image.jpg";
 
 function dataFile(name) { return path.join(USER_DATA_DIR, name); }
@@ -53,9 +63,11 @@ function loadState() {
             antiChat:           s.antiChat            || {},
             lockedBanners:      s.lockedBanners       || {},
             lockedGroupNames:   s.lockedGroupNames    || {},
+            profileGuardUrl:    s.profileGuardUrl     || null,
+            profileGuardActive: s.profileGuardActive  || false,
         };
     } catch (_) {
-        return { loopEnabled:{}, autoRespondEnabled:{}, mutedThreads:{}, nicknameMap:{}, antiRestrict:false, antiChat:{}, lockedBanners:{}, lockedGroupNames:{} };
+        return { loopEnabled:{}, autoRespondEnabled:{}, mutedThreads:{}, nicknameMap:{}, antiRestrict:false, antiChat:{}, lockedBanners:{}, lockedGroupNames:{}, profileGuardUrl:null, profileGuardActive:false };
     }
 }
 function saveState() {
@@ -69,13 +81,15 @@ function saveState() {
             antiChat:           sharedState.antiChat,
             lockedBanners:      sharedState.lockedBanners,
             lockedGroupNames:   sharedState.lockedGroupNames,
+            profileGuardUrl:    sharedState.profileGuardUrl,
+            profileGuardActive: sharedState.profileGuardActive,
         }, null, 2));
     } catch (_) {}
 }
 const sharedState = loadState();
 
 let reconnectDelay   = MIN_RECONNECT;
-let lockedProfilePic = null;
+let lockedProfilePic = sharedState.profileGuardUrl || null;
 let profilePicTimer  = null;
 const tempPerms      = {};
 const loopActive     = {};
@@ -142,7 +156,13 @@ function startProfileGuard(api) {
         api.changeAvatar(lockedProfilePic,"",err=>{if(!err)log("info","Profile restored.");});
     }, 5*60*1000);
 }
-function stopProfileGuard() { if(profilePicTimer){clearInterval(profilePicTimer);profilePicTimer=null;} lockedProfilePic=null; }
+function stopProfileGuard() {
+    if(profilePicTimer){clearInterval(profilePicTimer);profilePicTimer=null;}
+    lockedProfilePic=null;
+    sharedState.profileGuardUrl=null;
+    sharedState.profileGuardActive=false;
+    saveState();
+}
 function hasTempPerm(uid)   { if(!tempPerms[uid])return false; if(Date.now()>tempPerms[uid]){delete tempPerms[uid];return false;} return true; }
 function parseTime(str) {
     const m=str.match(/^(\d+)(s|sec|min|m|h|hr)$/i);
@@ -314,83 +334,54 @@ function scheduleReconnect() {
     reconnectDelay = Math.min(reconnectDelay*2, MAX_RECONNECT);
 }
 
-async function playCommand(api, query, threadID) {
+function playCommand(api, query, threadID) {
     if (!query) { api.sendMessage("Usage: !p <song name> or !p <youtube url>", threadID, ()=>{}); return; }
     api.sendMessage(`Searching: "${query.slice(0,60)}"...`, threadID, ()=>{});
 
-    const ytdl    = require("@distube/ytdl-core");
-    const ytSearch= require("youtube-search-api");
-    const tmp     = `/tmp/song_${Date.now()}.mp4`;
+    const tmp = `/tmp/song_${Date.now()}.mp3`;
+    const isYtUrl = /youtu(?:be\.com|\.be)/i.test(query);
 
-    const YT_HEADERS = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Accept": "*/*",
-    };
-
-    async function downloadAndSend(videoUrl) {
-        try {
-            const agent = ytdl.createAgent();
-            const info  = await ytdl.getInfo(videoUrl, {
-                agent,
-                requestOptions: { headers: YT_HEADERS },
-            });
-            const title = info.videoDetails.title || "Unknown";
-            const dur   = parseInt(info.videoDetails.lengthSeconds) || 0;
-            if (dur > 600) {
-                api.sendMessage(`Song too long (max 10 min). Found: "${title}"`, threadID, ()=>{});
+    function downloadAndSend(url) {
+        const safeUrl = url.replace(/"/g, "");
+        const dlCmd = `yt-dlp -x --audio-format mp3 --audio-quality 0 --no-playlist --max-filesize 50m -o "${tmp}" --print "%(title)s" "${safeUrl}"`;
+        exec(dlCmd, { timeout: 120000 }, (err, stdout) => {
+            if (err) {
+                try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch(_) {}
+                log("warn", `!p yt-dlp error: ${(err.message||"").slice(0,120)}`);
+                api.sendMessage("Could not download that song. Try sending a direct YouTube URL.", threadID, ()=>{});
                 return;
             }
-            const formats = ytdl.filterFormats(info.formats, "audioonly");
-            if (!formats.length) {
-                api.sendMessage("No audio stream available for that video.", threadID, ()=>{});
+            const title = (stdout||"").trim().split("\n")[0] || "Unknown";
+            if (!fs.existsSync(tmp)) {
+                api.sendMessage("Download failed. Try a different song or YouTube URL.", threadID, ()=>{});
                 return;
             }
-            const fmt = formats.sort((a,b)=>(b.audioBitrate||0)-(a.audioBitrate||0))[0];
-            const stream = ytdl.downloadFromInfo(info, { format: fmt, agent, requestOptions: { headers: YT_HEADERS } });
-            const ws = fs.createWriteStream(tmp);
-
-            await new Promise((resolve, reject) => {
-                stream.pipe(ws);
-                ws.on("finish", resolve);
-                ws.on("error", reject);
-                stream.on("error", reject);
-            });
-
-            await new Promise((resolve, reject) => {
-                api.sendMessage(
-                    { body: `Now playing: ${title}`, attachment: fs.createReadStream(tmp) },
-                    threadID,
-                    err => {
-                        try { fs.unlinkSync(tmp); } catch(_) {}
-                        if (err) { log("warn",`!p send error: ${err}`); reject(err); }
-                        else { send("totalReply"); resolve(); }
-                    }
-                );
-            });
-        } catch(err) {
-            try { if(fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch(_) {}
-            log("warn",`!p error: ${err.message}`);
-            api.sendMessage(`Could not play that song. Try sending a direct YouTube link.`, threadID, ()=>{});
-        }
+            api.sendMessage(
+                { body: `Now playing: ${title}`, attachment: fs.createReadStream(tmp) },
+                threadID,
+                (sendErr) => {
+                    try { fs.unlinkSync(tmp); } catch(_) {}
+                    if (sendErr) log("warn", `!p send error: ${sendErr}`);
+                    else send("totalReply");
+                }
+            );
+        });
     }
 
-    const isYtUrl = /youtu(?:be\.com|\.be)/i.test(query);
     if (isYtUrl) { downloadAndSend(query); return; }
 
-    try {
-        const results = await ytSearch.GetListByKeyword(query, false, 10);
-        const items   = (results && results.items) || [];
-        const video   = items.find(i => i.type==="video" || (i.id && i.title));
-        if (!video || !video.id) {
+    const safeQ = query.replace(/"/g, "'");
+    const searchCmd = `yt-dlp "ytsearch1:${safeQ}" --print "%(webpage_url)s|||%(title)s" --no-download`;
+    exec(searchCmd, { timeout: 30000 }, (err, stdout) => {
+        if (err || !stdout.trim()) {
             api.sendMessage(`No results found for: "${query}"`, threadID, ()=>{});
             return;
         }
-        downloadAndSend(`https://www.youtube.com/watch?v=${video.id}`);
-    } catch(err) {
-        log("warn",`!p search error: ${err.message}`);
-        api.sendMessage("Search failed. Try sending a YouTube URL directly.", threadID, ()=>{});
-    }
+        const line = (stdout.trim().split("\n").find(l => l.includes("|||")) || "").trim();
+        if (!line) { api.sendMessage(`No results found for: "${query}"`, threadID, ()=>{}); return; }
+        const [url] = line.split("|||");
+        downloadAndSend((url||"").trim());
+    });
 }
 
 function ttsChipmunk(text, lang, threadID, api, targetID) {
@@ -420,13 +411,29 @@ function startBot() {
     try { appState = JSON.parse(fs.readFileSync(FBSTATE_FILE,"utf8")); }
     catch(e) { log("error","Cannot read fbstate: "+e.message); send("status",{loggedIn:false,reconnecting:false}); return; }
 
+    const selectedUA = getRandomUA();
+    log("info", `Connecting... (protection active)`);
+
     login(appState, {
-        online:true, selfListen:true, listenEvents:true, autoMarkDelivery:false, logLevel:"silent",
+        online: true,
+        selfListen: true,
+        listenEvents: true,
+        autoMarkDelivery: false,
+        logLevel: "silent",
+        userAgent: selectedUA,
+        forceLogin: true,
     }, (err, api) => {
         if (err) {
             const msg = err.message||JSON.stringify(err);
             log("error","Login failed: "+msg);
-            const isExpired = msg.includes("Error retrieving userID")||msg.includes("Checkpoint");
+            const isCheckpoint = msg.includes("Checkpoint")||msg.includes("checkpoint")||msg.includes("confirm")||msg.includes("verify")||msg.includes("human");
+            const isExpired = msg.includes("Error retrieving userID")||msg.includes("expired")||msg.includes("locked");
+            if (isCheckpoint) {
+                log("warn", "Account checkpoint detected — confirm your identity on Facebook, then update cookie.");
+                send("alert", { alertType:"warn", message:"Account checkpoint! Go to Facebook and verify your identity, then re-paste your cookie." });
+                send("status",{loggedIn:false,reconnecting:false,expired:true});
+                return;
+            }
             if (isExpired && reconnectDelay>=MAX_RECONNECT) {
                 log("error","Session expired. Update cookie from dashboard.");
                 send("status",{loggedIn:false,reconnecting:false,expired:true});
@@ -436,7 +443,13 @@ function startBot() {
             return;
         }
 
-        api.setOptions({ userAgent:"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" });
+        api.setOptions({ userAgent: selectedUA });
+        log("info", "Account protection: ON | Anti-automation: ACTIVE");
+        if (sharedState.profileGuardActive && sharedState.profileGuardUrl) {
+            lockedProfilePic = sharedState.profileGuardUrl;
+            startProfileGuard(api);
+            log("info", "Profile guard restored.");
+        }
         reconnectDelay = MIN_RECONNECT;
         const BOT_SELF_ID = api.getCurrentUserID();
         api.getUserInfo([BOT_SELF_ID], (err2, ret) => {
@@ -644,12 +657,12 @@ function startBot() {
             const args=message.slice(PREFIX.length).trim().split(/\s+/);
             const cmd=args[0].toLowerCase();
 
-            if (cmd==="on")  { if(!isPM){sharedState.autoRespondEnabled[threadID]=true; send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled}); saveState();} return; }
-            if (cmd==="off") { if(!isPM){sharedState.autoRespondEnabled[threadID]=false;send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled}); saveState();} return; }
-
             const wl=getWhitelist();
             if (wl.enabled&&!isAuthorized(senderID)&&!wl.uids.includes(senderID)) return;
             if (!isAuthorized(senderID)) { log("warn",`Command !${cmd} blocked — unauthorized. sender=${senderID}`); return; }
+
+            if (cmd==="on")  { if(!isPM){sharedState.autoRespondEnabled[threadID]=true; send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled}); saveState();} return; }
+            if (cmd==="off") { if(!isPM){sharedState.autoRespondEnabled[threadID]=false;send("stateUpdate",{autoRespondEnabled:sharedState.autoRespondEnabled}); saveState();} return; }
 
             if (cmd==="stop")   { if(loopActive[threadID]) stopLoop(threadID,api); return; }
             if (cmd==="mute")   { sharedState.mutedThreads[threadID]=true; send("stateUpdate",{mutedThreads:sharedState.mutedThreads}); saveState(); return; }
@@ -750,7 +763,22 @@ function startBot() {
             }
 
             if (cmd==="broadcast") { const txt=args.slice(1).join(" ");if(!txt)return;const targets=Object.keys(sharedState.autoRespondEnabled).filter(t=>sharedState.autoRespondEnabled[t]);if(!targets.length)return;targets.forEach(t=>api.sendMessage(`${txt}`,t,()=>{}));return; }
-            if (cmd==="gp")  { const sub=args[1];if(!sub||sub==="off"){stopProfileGuard();return;}if(!sub.startsWith("http"))return;lockedProfilePic=sub;startProfileGuard(api);return; }
+            if (cmd==="gp")  {
+                const sub=args[1];
+                if(!sub||sub==="off"){
+                    stopProfileGuard();
+                    api.sendMessage("Profile guard disabled.", threadID, ()=>{});
+                    return;
+                }
+                if(!sub.startsWith("http"))return;
+                lockedProfilePic=sub;
+                sharedState.profileGuardUrl=sub;
+                sharedState.profileGuardActive=true;
+                saveState();
+                startProfileGuard(api);
+                api.sendMessage("Profile guard enabled. Re-locking every 5 mins.", threadID, ()=>{});
+                return;
+            }
             if (cmd==="antirestrict") { sharedState.antiRestrict=!sharedState.antiRestrict;return; }
             if (cmd==="antichat")     { sharedState.antiChat[threadID]=!sharedState.antiChat[threadID];return; }
             if (cmd==="id")     { const rep=event.messageReply;if(!rep)return;api.sendMessage(`${rep.senderID}`,threadID,()=>{});return; }
