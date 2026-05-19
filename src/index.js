@@ -165,6 +165,11 @@ dashboard.setStopAllHandler((userId) => {
     workers.forEach(w => { if (w && w.connected) try { w.send({ type:"stopAllLoops" }); } catch(_){} });
 });
 
+dashboard.setBotProfileGuardHandler((userId, enabled) => {
+    const workers = userWorkers.get(userId) || [];
+    workers.forEach(w => { if (w && w.connected) try { w.send({ type:"setProfileGuard", enabled }); } catch(_){} });
+});
+
 dashboard.setCookieUpdateHandler((userId) => {
     dashboard.addLog(userId, "info", "Cookie updated — restarting bots...");
     dashboard.addAlert(userId, "info", "Cookie updated — restarting bots now...");

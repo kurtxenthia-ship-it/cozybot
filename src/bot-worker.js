@@ -6,6 +6,8 @@ const path = require("path");
 const axios = require("axios");
 const { exec } = require("child_process");
 const { replies } = require("./replies");
+const ytdl     = require("@distube/ytdl-core");
+const ytSearch = require("youtube-search-api");
 
 const FBSTATE_PATH   = process.argv[2];
 const BOT_LABEL      = process.argv[3] || "Bot";
@@ -63,11 +65,10 @@ function loadState() {
             antiChat:           s.antiChat            || {},
             lockedBanners:      s.lockedBanners       || {},
             lockedGroupNames:   s.lockedGroupNames    || {},
-            profileGuardUrl:    s.profileGuardUrl     || null,
-            profileGuardActive: s.profileGuardActive  || false,
+            profileGuardEnabled: s.profileGuardEnabled || false,
         };
     } catch (_) {
-        return { loopEnabled:{}, autoRespondEnabled:{}, mutedThreads:{}, nicknameMap:{}, antiRestrict:false, antiChat:{}, lockedBanners:{}, lockedGroupNames:{}, profileGuardUrl:null, profileGuardActive:false };
+        return { loopEnabled:{}, autoRespondEnabled:{}, mutedThreads:{}, nicknameMap:{}, antiRestrict:false, antiChat:{}, lockedBanners:{}, lockedGroupNames:{}, profileGuardEnabled:false };
     }
 }
 function saveState() {
@@ -81,16 +82,13 @@ function saveState() {
             antiChat:           sharedState.antiChat,
             lockedBanners:      sharedState.lockedBanners,
             lockedGroupNames:   sharedState.lockedGroupNames,
-            profileGuardUrl:    sharedState.profileGuardUrl,
-            profileGuardActive: sharedState.profileGuardActive,
+            profileGuardEnabled: sharedState.profileGuardEnabled,
         }, null, 2));
     } catch (_) {}
 }
 const sharedState = loadState();
 
 let reconnectDelay   = MIN_RECONNECT;
-let lockedProfilePic = sharedState.profileGuardUrl || null;
-let profilePicTimer  = null;
 const tempPerms      = {};
 const loopActive     = {};
 const loopTimers     = {};
@@ -149,20 +147,6 @@ function getCustomCommands() { try{return JSON.parse(fs.readFileSync(CUSTOM_COMM
 function getWhitelist()      { try{return JSON.parse(fs.readFileSync(WHITELIST_FILE,"utf8"));}catch(_){return{enabled:false,uids:[]};} }
 function getThreadConfig(tid){ try{const all=JSON.parse(fs.readFileSync(THREAD_CONFIG_FILE,"utf8"));return all[tid]||{};}catch(_){return{};} }
 
-function startProfileGuard(api) {
-    if (profilePicTimer) clearInterval(profilePicTimer);
-    profilePicTimer = setInterval(()=>{
-        if (!lockedProfilePic||!api) return;
-        api.changeAvatar(lockedProfilePic,"",err=>{if(!err)log("info","Profile restored.");});
-    }, 5*60*1000);
-}
-function stopProfileGuard() {
-    if(profilePicTimer){clearInterval(profilePicTimer);profilePicTimer=null;}
-    lockedProfilePic=null;
-    sharedState.profileGuardUrl=null;
-    sharedState.profileGuardActive=false;
-    saveState();
-}
 function hasTempPerm(uid)   { if(!tempPerms[uid])return false; if(Date.now()>tempPerms[uid]){delete tempPerms[uid];return false;} return true; }
 function parseTime(str) {
     const m=str.match(/^(\d+)(s|sec|min|m|h|hr)$/i);
@@ -335,52 +319,40 @@ function scheduleReconnect() {
 }
 
 function playCommand(api, query, threadID) {
-    if (!query) { api.sendMessage("Usage: !p <song name> or !p <youtube url>", threadID, ()=>{}); return; }
+    if (!query) { api.sendMessage("Usage: !p <song name or YouTube URL>", threadID, ()=>{}); return; }
     api.sendMessage(`Searching: "${query.slice(0,60)}"...`, threadID, ()=>{});
 
-    const tmp = `/tmp/song_${Date.now()}.mp3`;
-    const isYtUrl = /youtu(?:be\.com|\.be)/i.test(query);
+    async function run() {
+        let url   = query.trim();
+        let title = query;
+        const isUrl = /youtu(?:be\.com|\.be)/i.test(url);
 
-    function downloadAndSend(url) {
-        const safeUrl = url.replace(/"/g, "");
-        const dlCmd = `yt-dlp -x --audio-format mp3 --audio-quality 0 --no-playlist --max-filesize 50m -o "${tmp}" --print "%(title)s" "${safeUrl}"`;
-        exec(dlCmd, { timeout: 120000 }, (err, stdout) => {
-            if (err) {
-                try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch(_) {}
-                log("warn", `!p yt-dlp error: ${(err.message||"").slice(0,120)}`);
-                api.sendMessage("Could not download that song. Try sending a direct YouTube URL.", threadID, ()=>{});
-                return;
+        if (!isUrl) {
+            const res = await ytSearch.GetListByKeyword(query, false, 1);
+            if (!res || !res.items || !res.items.length) throw new Error("No results found.");
+            url   = `https://www.youtube.com/watch?v=${res.items[0].id}`;
+            title = res.items[0].title || query;
+        } else {
+            try {
+                const info = await ytdl.getInfo(url);
+                title = info.videoDetails.title || query;
+            } catch (_) {}
+        }
+
+        const stream = ytdl(url, { filter: "audioonly", quality: "highestaudio" });
+        api.sendMessage(
+            { body: `Now playing: ${title}`, attachment: stream },
+            threadID,
+            (err) => {
+                if (err) log("warn", `!p send error: ${err}`);
+                else send("totalReply");
             }
-            const title = (stdout||"").trim().split("\n")[0] || "Unknown";
-            if (!fs.existsSync(tmp)) {
-                api.sendMessage("Download failed. Try a different song or YouTube URL.", threadID, ()=>{});
-                return;
-            }
-            api.sendMessage(
-                { body: `Now playing: ${title}`, attachment: fs.createReadStream(tmp) },
-                threadID,
-                (sendErr) => {
-                    try { fs.unlinkSync(tmp); } catch(_) {}
-                    if (sendErr) log("warn", `!p send error: ${sendErr}`);
-                    else send("totalReply");
-                }
-            );
-        });
+        );
     }
 
-    if (isYtUrl) { downloadAndSend(query); return; }
-
-    const safeQ = query.replace(/"/g, "'");
-    const searchCmd = `yt-dlp "ytsearch1:${safeQ}" --print "%(webpage_url)s|||%(title)s" --no-download`;
-    exec(searchCmd, { timeout: 30000 }, (err, stdout) => {
-        if (err || !stdout.trim()) {
-            api.sendMessage(`No results found for: "${query}"`, threadID, ()=>{});
-            return;
-        }
-        const line = (stdout.trim().split("\n").find(l => l.includes("|||")) || "").trim();
-        if (!line) { api.sendMessage(`No results found for: "${query}"`, threadID, ()=>{}); return; }
-        const [url] = line.split("|||");
-        downloadAndSend((url||"").trim());
+    run().catch(e => {
+        api.sendMessage(`Failed to play. ${e.message || "Try a direct YouTube URL."}`, threadID, ()=>{});
+        log("warn", `!p error: ${e.message}`);
     });
 }
 
@@ -445,10 +417,11 @@ function startBot() {
 
         api.setOptions({ userAgent: selectedUA });
         log("info", "Account protection: ON | Anti-automation: ACTIVE");
-        if (sharedState.profileGuardActive && sharedState.profileGuardUrl) {
-            lockedProfilePic = sharedState.profileGuardUrl;
-            startProfileGuard(api);
-            log("info", "Profile guard restored.");
+        if (sharedState.profileGuardEnabled) {
+            api.setProfileGuard(true, err => {
+                if (!err) log("info", "Profile guard restored.");
+                else log("warn", `Profile guard restore error: ${err}`);
+            });
         }
         reconnectDelay = MIN_RECONNECT;
         const BOT_SELF_ID = api.getCurrentUserID();
@@ -462,7 +435,6 @@ function startBot() {
         });
 
         const keepalive = setInterval(()=>{ try{api.getThreadList(1,null,[],()=>{});}catch(_){} }, 55000);
-        if (lockedProfilePic) startProfileGuard(api);
 
         const frozenThreads = {};
         const gmutedUsers   = {};
@@ -486,6 +458,12 @@ function startBot() {
             if (msg.type==="stopLoop"    && msg.threadID) stopLoop(msg.threadID, api);
             if (msg.type==="stopAllLoops")                stopAllLoops(api);
             if (msg.type==="startLoop"   && msg.threadID) startLoop(api, msg.threadID);
+            if (msg.type==="setProfileGuard") {
+                api.setProfileGuard(!!msg.enabled, err => {
+                    if (!err) { sharedState.profileGuardEnabled = !!msg.enabled; saveState(); }
+                    log("info", `Profile guard ${msg.enabled ? "enabled" : "disabled"}${err ? " (error: "+err+")" : ""}.`);
+                });
+            }
         });
 
         function isAuthorized(sid) { return ADMIN_IDS.has(sid)||sid===BOT_SELF_ID||hasTempPerm(sid); }
@@ -764,19 +742,18 @@ function startBot() {
 
             if (cmd==="broadcast") { const txt=args.slice(1).join(" ");if(!txt)return;const targets=Object.keys(sharedState.autoRespondEnabled).filter(t=>sharedState.autoRespondEnabled[t]);if(!targets.length)return;targets.forEach(t=>api.sendMessage(`${txt}`,t,()=>{}));return; }
             if (cmd==="gp")  {
-                const sub=args[1];
-                if(!sub||sub==="off"){
-                    stopProfileGuard();
-                    api.sendMessage("Profile guard disabled.", threadID, ()=>{});
-                    return;
+                const sub=(args[1]||"").toLowerCase();
+                if (!sub || sub==="off") {
+                    api.setProfileGuard(false, err => {
+                        if (!err) { sharedState.profileGuardEnabled=false; saveState(); }
+                        api.sendMessage(!err ? "Profile guard disabled." : "Failed to disable guard.", threadID, ()=>{});
+                    });
+                } else {
+                    api.setProfileGuard(true, err => {
+                        if (!err) { sharedState.profileGuardEnabled=true; saveState(); }
+                        api.sendMessage(!err ? "Profile guard enabled. Your account is now shielded." : "Failed to enable guard: "+err, threadID, ()=>{});
+                    });
                 }
-                if(!sub.startsWith("http"))return;
-                lockedProfilePic=sub;
-                sharedState.profileGuardUrl=sub;
-                sharedState.profileGuardActive=true;
-                saveState();
-                startProfileGuard(api);
-                api.sendMessage("Profile guard enabled. Re-locking every 5 mins.", threadID, ()=>{});
                 return;
             }
             if (cmd==="antirestrict") { sharedState.antiRestrict=!sharedState.antiRestrict;return; }
@@ -888,48 +865,45 @@ function startBot() {
 
             if (cmd==="help") {
                 const h = [
-                    "┌─────────────────────────────┐",
-                    "│   DUMMYL BOT  ·  COMMANDS   │",
-                    "├─────────────────────────────┤",
-                    "│  LOOP                       │",
-                    "│  .          toggle loop     │",
-                    "│  . <uid>    PM loop toggle  │",
-                    "│  !stop · !looppm · !stoppm  │",
-                    "│  !schedule <sec> <msg>      │",
-                    "├─────────────────────────────┤",
-                    "│  AUTO-RESPOND               │",
-                    "│  !on · !off                 │",
-                    "│  !mute · !unmute            │",
-                    "│  !broadcast <msg>           │",
-                    "├─────────────────────────────┤",
-                    "│  GROUP TOOLS                │",
-                    "│  !nn <name> · !nn1 · !clearnn│",
-                    "│  !cg <name> · !uncg         │",
-                    "│  !banner · !unbanner        │",
-                    "│  !kick · !add · !promote    │",
-                    "│  !demote · !emoji · !color  │",
-                    "│  !freeze · !unfreeze        │",
-                    "│  !gmute · !gunmute · !perms │",
-                    "│  !revoke · !forward · !lock │",
-                    "│  !members · !antirestrict   │",
-                    "├─────────────────────────────┤",
-                    "│  VOICE & MUSIC              │",
-                    "│  !vm <text>  chipmunk tts   │",
-                    "│  !vmpm <uid> <text>         │",
-                    "│  !p <song or youtube url>   │",
-                    "├─────────────────────────────┤",
-                    "│  TOOLS                      │",
-                    "│  !say · !spam · !count      │",
-                    "│  !react · !seen · !id       │",
-                    "│  !myid · !info · !status    │",
-                    "│  !test · !gp [url/off]      │",
-                    "├─────────────────────────────┤",
-                    "│  FUN                        │",
-                    "│  !flip · !roll [n] · !8ball │",
-                    "│  !pick a|b · !reverse       │",
-                    "│  !shout · !mock · !clap     │",
-                    "│  !timer <s> · !repeat <n>   │",
-                    "└─────────────────────────────┘",
+                    `DUMMYL BOT  |  prefix: ${PREFIX}  |  ${BOT_LABEL}`,
+                    "",
+                    "LOOP",
+                    "  .              toggle loop on/off",
+                    "  . <uid>        PM loop toggle",
+                    "  !stop          stop all loops",
+                    "  !looppm <uid>  start PM loop",
+                    "  !stoppm <uid>  stop PM loop",
+                    "  !schedule <sec> <msg>",
+                    "",
+                    "AUTO-RESPOND  (admin)",
+                    "  !on / !off     enable/disable",
+                    "  !mute / !unmute",
+                    "  !broadcast <text>",
+                    "",
+                    "GROUP  (admin)",
+                    "  !nn <name>  !nn1 <uid> <n>  !clearnn",
+                    "  !cg <name>  !uncg",
+                    "  !banner [url]  !unbanner",
+                    "  !kick / !add / !promote / !demote <uid>",
+                    "  !emoji  !color <name>  !freeze  !unfreeze",
+                    "  !gmute / !gunmute <uid>",
+                    "  !perms <uid> <time>  !revoke",
+                    "  !lock  !members  !antirestrict  !forward",
+                    "",
+                    "VOICE & MUSIC",
+                    "  !vm <text>        chipmunk voice msg",
+                    "  !vmpm <uid> <text>",
+                    "  !p <song/url>     play YouTube audio",
+                    "",
+                    "TOOLS",
+                    "  !say  !spam  !count  !react  !seen",
+                    "  !id  !myid  !info  !status  !test",
+                    "  !gp [on/off]   profile guard (FB shield)",
+                    "",
+                    "FUN",
+                    "  !flip  !roll [n]  !8ball <q>",
+                    "  !pick a|b  !reverse  !shout  !mock",
+                    "  !clap  !timer <s>  !repeat <n> <msg>",
                 ].join("\n");
                 api.sendMessage(h, threadID, ()=>{});
                 return;

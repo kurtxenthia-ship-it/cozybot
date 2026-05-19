@@ -34,8 +34,9 @@ function trackMessage(userId){ const s=getUserState(userId);s.msgTimestamps.push
 function setAccountInfoForUser(userId,data){ if(!accountInfos.has(userId))accountInfos.set(userId,{});Object.assign(accountInfos.get(userId),data); }
 function getAccountInfo(userId){ return accountInfos.get(userId)||{}; }
 
-let _cookieUpdateCb=null; function setCookieUpdateHandler(cb){_cookieUpdateCb=cb;}
-let _loopControlCb=null;  function setLoopControlHandler(cb){_loopControlCb=cb;}
+let _cookieUpdateCb=null;    function setCookieUpdateHandler(cb){_cookieUpdateCb=cb;}
+let _loopControlCb=null;     function setLoopControlHandler(cb){_loopControlCb=cb;}
+let _botProfileGuardCb=null; function setBotProfileGuardHandler(cb){_botProfileGuardCb=cb;}
 let _stopAllCb=null;      function setStopAllHandler(cb){_stopAllCb=cb;}
 
 function uDir(userId){ return auth.getUserDataDir(userId); }
@@ -1052,7 +1053,7 @@ function buildTempMailContent(uid) {
       <div class="bh"><span class="chip">INFO</span><span class="bt">How It Works</span></div>
       <div style="padding:14px 20px;display:flex;flex-direction:column;gap:10px">
         ${[
-          ["1","Generate","Click Generate to get a fresh @mail.tm address."],
+          ["1","Generate","Click Generate to get a fresh disposable address from 1secmail.com."],
           ["2","Use It","Paste your temp email anywhere you need to register."],
           ["3","Receive","Emails appear in your inbox within seconds."],
           ["4","Read","Click any email to read its full content."],
@@ -1106,7 +1107,7 @@ function buildTempMailContent(uid) {
 </div>
 
 <script>
-var _tmToken=null,_tmAddr=null,_tmAutoTimer=null,_tmCountTimer=null,_tmCountVal=10;
+var _tmLogin=null,_tmDomain=null,_tmAddr=null,_tmAutoTimer=null,_tmCountTimer=null,_tmCountVal=10;
 
 function escH(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
@@ -1135,7 +1136,7 @@ function generateTmEmail(){
       setTmStatus('Error: '+d.error,'tm-stat-err');
       return;
     }
-    _tmAddr=d.address;_tmToken=d.token;
+    _tmAddr=d.address;_tmLogin=d.login;_tmDomain=d.domain;
     var el=document.getElementById('tmAddr');
     el.className='tm-addr';
     el.textContent=d.address;
@@ -1160,10 +1161,10 @@ function copyTmEmail(){
 }
 
 function refreshTmInbox(){
-  if(!_tmToken){setTmStatus('Generate an email first','tm-stat-warn');return;}
+  if(!_tmLogin){setTmStatus('Generate an email first','tm-stat-warn');return;}
   var btn=document.getElementById('tmRefreshBtn');
   if(btn){btn.disabled=true;btn.innerHTML='<span class="tm-spin"></span> Refreshing...';}
-  fetch('/api/tempmail/inbox?token='+encodeURIComponent(_tmToken)).then(r=>r.json()).then(d=>{
+  fetch('/api/tempmail/inbox?login='+encodeURIComponent(_tmLogin)+'&domain='+encodeURIComponent(_tmDomain)).then(r=>r.json()).then(d=>{
     if(btn){btn.disabled=false;btn.innerHTML='${I.refresh.replace(/'/g,"\\'")} Refresh';}
     var el=document.getElementById('tmInboxList');
     var cnt=document.getElementById('tmInboxCount');
@@ -1202,7 +1203,7 @@ function viewTmMsg(id,subject,from){
   document.getElementById('tmMsgFrom').textContent='From: '+from;
   document.getElementById('tmMsgBody').textContent='Loading message...';
   document.getElementById('tmMsgView').scrollIntoView({behavior:'smooth',block:'start'});
-  fetch('/api/tempmail/message?token='+encodeURIComponent(_tmToken)+'&id='+encodeURIComponent(id)).then(r=>r.json()).then(d=>{
+  fetch('/api/tempmail/message?login='+encodeURIComponent(_tmLogin)+'&domain='+encodeURIComponent(_tmDomain)+'&id='+encodeURIComponent(id)).then(r=>r.json()).then(d=>{
     document.getElementById('tmMsgBody').textContent=d.body||d.text||'(empty message)';
   }).catch(()=>{document.getElementById('tmMsgBody').textContent='Failed to load message.';});
 }
@@ -1287,21 +1288,20 @@ function buildAccountContent(uid) {
 
 // ─── PROFILE GUARD ────────────────────────────────────────────────────────────
 function buildProfileGuardContent(uid) {
-    function readGuardState(uid) {
+    function readGuardEnabled(uid) {
         try {
             const s = JSON.parse(fs.readFileSync(uFile(uid, "bot_state.json"), "utf8"));
-            return { url: s.profileGuardUrl || null, active: s.profileGuardActive || false };
-        } catch(_) { return { url: null, active: false }; }
+            return s.profileGuardEnabled || false;
+        } catch(_) { return false; }
     }
-    const g = readGuardState(uid);
-    const isActive = g.active && g.url;
+    const isActive = readGuardEnabled(uid);
     return `
 <div class="hero"><div class="hero-in">
   <div class="hero-l">
     <div class="hero-ic">${I.guardPic}</div>
     <div>
       <div class="hero-title">Profile Guard</div>
-      <div class="hero-desc">Auto-lock your Facebook profile picture every 5 minutes</div>
+      <div class="hero-desc">Facebook's official profile shield — prevents others from screenshotting or downloading your profile picture</div>
     </div>
   </div>
   <div class="st-badge ${isActive?"st-on":"st-off"}"><span class="st-dot"></span>${isActive?"Active":"Inactive"}</div>
@@ -1309,24 +1309,24 @@ function buildProfileGuardContent(uid) {
 
 <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
   <div class="box" style="padding:22px 24px">
-    <div class="bt" style="margin-bottom:16px">Set Profile Guard URL</div>
-    <form method="POST" action="/api/profileguard/set" style="display:flex;flex-direction:column;gap:12px">
-      <div class="fld">
-        <label class="flbl">Profile Picture URL</label>
-        <input class="fi" name="url" type="url" placeholder="https://..." value="${g.url ? esc(g.url) : ""}">
-        <div class="fhint">Paste the direct URL of the image you want to lock as your profile picture.</div>
-      </div>
-      <button class="btn btn-r" type="submit">${I.guardPic} Enable Guard</button>
-    </form>
-    ${isActive ? `<form method="POST" action="/api/profileguard/stop" style="margin-top:10px"><button class="btn btn-danger btn-sm" type="submit">Disable Guard</button></form>` : ""}
+    <div class="bt" style="margin-bottom:18px">Toggle Profile Guard</div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <p style="font-size:12.5px;color:var(--gray);line-height:1.7;">
+        When enabled, Facebook places an official shield on your profile picture. Others cannot screenshot, download, or share it. This uses Facebook's own <b>IsShieldedSetMutation</b> API.
+      </p>
+      ${!isActive
+        ? `<form method="POST" action="/api/profileguard/enable"><button class="btn btn-r" type="submit">${I.guardPic} Enable Profile Guard</button></form>`
+        : `<form method="POST" action="/api/profileguard/disable"><button class="btn btn-danger" type="submit">Disable Profile Guard</button></form>`
+      }
+    </div>
   </div>
   <div class="box" style="padding:22px 24px">
     <div class="bt" style="margin-bottom:14px">How It Works</div>
     <div class="steps-g">
-      <div class="step"><div class="snum">1</div><div class="stxt">Paste the URL of your desired profile picture above and click Enable Guard.</div></div>
-      <div class="step"><div class="snum">2</div><div class="stxt">The bot automatically re-applies that picture every <b>5 minutes</b> to prevent replacement.</div></div>
-      <div class="step"><div class="snum">3</div><div class="stxt">You can also use the <code style="font-family:monospace;color:var(--off)">!gp &lt;url&gt;</code> command directly in a thread (admin only).</div></div>
-      <div class="step"><div class="snum">4</div><div class="stxt">To stop: use <code style="font-family:monospace;color:var(--off)">!gp off</code> in chat, or click Disable Guard above.</div></div>
+      <div class="step"><div class="snum">1</div><div class="stxt">Click <b>Enable Profile Guard</b> to activate Facebook's official profile picture shield.</div></div>
+      <div class="step"><div class="snum">2</div><div class="stxt">The shield is restored automatically whenever your bot reconnects to Facebook.</div></div>
+      <div class="step"><div class="snum">3</div><div class="stxt">You can also use <code style="font-family:monospace;color:var(--off)">!gp on</code> or <code style="font-family:monospace;color:var(--off)">!gp off</code> directly in any chat (admin only).</div></div>
+      <div class="step"><div class="snum">4</div><div class="stxt">This is Facebook's real built-in feature — not a workaround.</div></div>
     </div>
   </div>
 </div>
@@ -1339,12 +1339,12 @@ function buildProfileGuardContent(uid) {
       <span class="tag ${isActive?"tag-g":"tag-d"}">${isActive ? "YES" : "NO"}</span>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)">
-      <span style="color:var(--gray);font-size:12px">Locked Picture URL</span>
-      <span style="font-size:11.5px;color:var(--off);font-family:monospace;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${g.url ? esc(g.url) : "<span style='color:var(--gray2)'>Not set</span>"}</span>
+      <span style="color:var(--gray);font-size:12px">API Used</span>
+      <span style="font-size:12px;color:var(--off);font-family:monospace">IsShieldedSetMutation (FB GraphQL)</span>
     </div>
     <div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0">
-      <span style="color:var(--gray);font-size:12px">Re-lock Interval</span>
-      <span style="font-size:12px;color:var(--off)">Every 5 minutes</span>
+      <span style="color:var(--gray);font-size:12px">Command</span>
+      <span style="font-size:12px;color:var(--off);font-family:monospace">!gp on  /  !gp off</span>
     </div>
   </div>
 </div>`;
@@ -1479,72 +1479,42 @@ function buildPage(session, mainTab, innerTab) {
     return buildLayout(session,mainTab||"dashboard",content);
 }
 
-// ─── TEMP MAIL API (mail.tm) ──────────────────────────────────────────────────
-const https = require("https");
-function mailTmRequest(method, path_, body, token) {
-    return new Promise((resolve, reject) => {
-        const data = body ? JSON.stringify(body) : null;
-        const opts = {
-            hostname: "api.mail.tm",
-            path: path_,
-            method,
-            headers: {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                ...(token ? { "Authorization": "Bearer "+token } : {}),
-                ...(data ? { "Content-Length": Buffer.byteLength(data) } : {}),
-            },
-        };
-        const req = https.request(opts, res => {
-            let raw = "";
-            res.on("data", c => raw += c);
-            res.on("end", () => {
-                try { resolve({ status: res.statusCode, body: JSON.parse(raw) }); }
-                catch(_) { resolve({ status: res.statusCode, body: raw }); }
-            });
-        });
-        req.on("error", reject);
-        if (data) req.write(data);
-        req.end();
-    });
-}
-
-async function generateTempMail() {
+// ─── TEMP MAIL API (1secmail.com) ─────────────────────────────────────────────
+async function generate1SecMail() {
     try {
-        const domsRes = await mailTmRequest("GET", "/domains?page=1");
-        const domains = domsRes.body?.["hydra:member"] || [];
-        if (!domains.length) return { error: "No domains available" };
-        const domain = domains[0].domain;
-        const user = "dbl" + Math.random().toString(36).slice(2,10);
-        const email = `${user}@${domain}`;
-        const pass = Math.random().toString(36).slice(2,14) + "Aa1!";
-        const createRes = await mailTmRequest("POST", "/accounts", { address: email, password: pass });
-        if (createRes.status !== 201) return { error: "Failed to create account" };
-        const tokenRes = await mailTmRequest("POST", "/token", { address: email, password: pass });
-        if (tokenRes.status !== 200) return { error: "Failed to get token" };
-        return { address: email, token: tokenRes.body.token };
+        const res = await fetch("https://www.1secmail.com/api/v1/?action=genRandomMailbox&count=1");
+        if (!res.ok) return { error: "Failed to generate address" };
+        const arr = await res.json();
+        if (!arr || !arr.length) return { error: "No address returned" };
+        const email = arr[0];
+        const atIdx = email.indexOf("@");
+        const login  = email.slice(0, atIdx);
+        const domain = email.slice(atIdx + 1);
+        return { address: email, login, domain };
     } catch(e) { return { error: e.message }; }
 }
 
-async function getTempMailInbox(token) {
+async function get1SecMailInbox(login, domain) {
     try {
-        const res = await mailTmRequest("GET", "/messages?page=1", null, token);
-        if (res.status !== 200) return { error: "Failed to fetch inbox" };
-        const msgs = (res.body?.["hydra:member"] || []).map(m => ({
-            id: m.id,
-            from: m.from?.address || "Unknown",
+        const res = await fetch(`https://www.1secmail.com/api/v1/?action=getMessages&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}`);
+        if (!res.ok) return { error: "Failed to fetch inbox" };
+        const arr = await res.json();
+        const msgs = (arr || []).map(m => ({
+            id:      m.id,
+            from:    m.from    || "Unknown",
             subject: m.subject || "(no subject)",
-            date: m.createdAt ? new Date(m.createdAt).toLocaleString() : "",
+            date:    m.date    || "",
         }));
         return { messages: msgs };
     } catch(e) { return { error: e.message }; }
 }
 
-async function getTempMailMessage(token, id) {
+async function read1SecMailMessage(login, domain, id) {
     try {
-        const res = await mailTmRequest("GET", `/messages/${id}`, null, token);
-        if (res.status !== 200) return { error: "Failed to fetch message" };
-        return { body: res.body?.text || res.body?.html || "(empty)", subject: res.body?.subject || "" };
+        const res = await fetch(`https://www.1secmail.com/api/v1/?action=readMessage&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}&id=${encodeURIComponent(id)}`);
+        if (!res.ok) return { error: "Failed to fetch message" };
+        const m = await res.json();
+        return { body: m.textBody || m.htmlBody || "(empty)", subject: m.subject || "" };
     } catch(e) { return { error: e.message }; }
 }
 
@@ -1674,48 +1644,44 @@ function startDashboard(port) {
 
         // Temp mail API
         if (path_==="/api/tempmail/generate"&&req.method==="POST") {
-            const result = await generateTempMail();
+            const result = await generate1SecMail();
             return json(result);
         }
         if (path_==="/api/tempmail/inbox"&&req.method==="GET") {
-            const token = url_.searchParams.get("token")||"";
-            if (!token) return json({error:"No token"});
-            const result = await getTempMailInbox(token);
+            const login  = url_.searchParams.get("login")||"";
+            const domain = url_.searchParams.get("domain")||"";
+            if (!login||!domain) return json({error:"Missing login/domain"});
+            const result = await get1SecMailInbox(login, domain);
             return json(result);
         }
         if (path_==="/api/tempmail/message"&&req.method==="GET") {
-            const token = url_.searchParams.get("token")||"";
-            const id = url_.searchParams.get("id")||"";
-            if (!token||!id) return json({error:"Missing params"});
-            const result = await getTempMailMessage(token, id);
+            const login  = url_.searchParams.get("login")||"";
+            const domain = url_.searchParams.get("domain")||"";
+            const id     = url_.searchParams.get("id")||"";
+            if (!login||!domain||!id) return json({error:"Missing params"});
+            const result = await read1SecMailMessage(login, domain, id);
             return json(result);
         }
 
         // Profile Guard endpoints
-        if (path_==="/api/profileguard/set"&&req.method==="POST") {
-            const body = await parseBody(req);
-            const url = (body.url||"").trim();
-            if (url && url.startsWith("http")) {
-                const stateFile = uFile(uid, "bot_state.json");
-                let st = {};
-                try { st = JSON.parse(fs.readFileSync(stateFile, "utf8")); } catch(_) {}
-                st.profileGuardUrl = url;
-                st.profileGuardActive = true;
-                auth.ensureUserDataDir(uid);
-                fs.writeFileSync(stateFile, JSON.stringify(st, null, 2));
-                if (_cookieUpdateCb) _cookieUpdateCb(uid);
-            }
-            return redirect("/?tab=profileguard");
-        }
-        if (path_==="/api/profileguard/stop"&&req.method==="POST") {
+        if (path_==="/api/profileguard/enable"&&req.method==="POST") {
+            if (_botProfileGuardCb) _botProfileGuardCb(uid, true);
             const stateFile = uFile(uid, "bot_state.json");
             let st = {};
             try { st = JSON.parse(fs.readFileSync(stateFile, "utf8")); } catch(_) {}
-            st.profileGuardUrl = null;
-            st.profileGuardActive = false;
+            st.profileGuardEnabled = true;
             auth.ensureUserDataDir(uid);
             fs.writeFileSync(stateFile, JSON.stringify(st, null, 2));
-            if (_cookieUpdateCb) _cookieUpdateCb(uid);
+            return redirect("/?tab=profileguard");
+        }
+        if (path_==="/api/profileguard/disable"&&req.method==="POST") {
+            if (_botProfileGuardCb) _botProfileGuardCb(uid, false);
+            const stateFile = uFile(uid, "bot_state.json");
+            let st = {};
+            try { st = JSON.parse(fs.readFileSync(stateFile, "utf8")); } catch(_) {}
+            st.profileGuardEnabled = false;
+            auth.ensureUserDataDir(uid);
+            fs.writeFileSync(stateFile, JSON.stringify(st, null, 2));
             return redirect("/?tab=profileguard");
         }
 
@@ -1844,6 +1810,6 @@ function startDashboard(port) {
 
 module.exports = {
     startDashboard, getUserState, addLog, sysLog, addAlert, state,
-    setCookieUpdateHandler, setLoopControlHandler, setStopAllHandler,
+    setCookieUpdateHandler, setLoopControlHandler, setStopAllHandler, setBotProfileGuardHandler,
     trackMessage, setAccountInfoForUser,
 };
