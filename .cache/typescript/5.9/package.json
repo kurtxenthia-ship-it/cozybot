@@ -1,1 +1,0 @@
-{"private":true,"dependencies":{"types-registry":"^0.1.770"},"devDependencies":{"@types/bluebird":"^3.5.42","@types/gradient-string":"^1.1.6","@types/node":"^25.9.1","@types/node-cron":"^3.0.11","@types/npmlog":"^7.0.0","@types/react":"^19.2.15","@types/request":"^2.48.13"}}
