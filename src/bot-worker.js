@@ -1,6 +1,6 @@
 "use strict";
 
-const { login } = require("ws3-fca");
+const { login } = require("fca-unofficial");
 const fs   = require("fs");
 const path = require("path");
 const axios = require("axios");
@@ -609,31 +609,27 @@ function startBot() {
                     if (isReplyToBot || isDirectMsg) {
                         const question = message.trim();
                         if (question) {
-                            axios.post("https://api.openai.com/v1/chat/completions", {
-                                model: "gpt-3.5-turbo",
-                                messages: [{ role:"user", content: question }],
-                                max_tokens: 300,
+                            const groqKey = process.env.GROQ_API_KEY || "";
+                            axios.post("https://api.groq.com/openai/v1/chat/completions", {
+                                model: "llama3-8b-8192",
+                                messages: [
+                                    { role: "system", content: "You are a helpful assistant. Keep responses concise." },
+                                    { role: "user", content: question }
+                                ],
+                                max_tokens: 400,
                             }, {
                                 headers: {
-                                    "Authorization": `Bearer ${process.env.OPENAI_API_KEY||""}`,
+                                    "Authorization": `Bearer ${groqKey}`,
                                     "Content-Type": "application/json"
                                 },
                                 timeout: 20000
                             }).then(r => {
-                                const reply = r.data?.choices?.[0]?.message?.content || "I couldn't generate a response.";
+                                const reply = r.data?.choices?.[0]?.message?.content || "No response.";
                                 api.sendMessage(reply.trim(), threadID, (err, info) => {
                                     if (!err && info) lastBotMsgID[threadID] = info.messageID;
                                 });
                             }).catch(() => {
-                                const fallbacks = [
-                                    "Interesting question! I'm thinking...",
-                                    "That's a great point.",
-                                    "Let me think about that.",
-                                    "I'm not sure, but I'd say yes.",
-                                    "Can you tell me more about that?",
-                                ];
-                                const reply = fallbacks[Math.floor(Math.random()*fallbacks.length)];
-                                api.sendMessage(reply, threadID, (err, info) => {
+                                api.sendMessage("AI is busy, try again.", threadID, (err, info) => {
                                     if (!err && info) lastBotMsgID[threadID] = info.messageID;
                                 });
                             });
@@ -868,59 +864,110 @@ function startBot() {
                 return;
             }
 
+            if (cmd==="gpt") {
+                const question = args.slice(1).join(" ").trim();
+                if (!question) {
+                    api.sendMessage("Usage: !gpt <question>", threadID, ()=>{});
+                    return;
+                }
+                const groqKey = process.env.GROQ_API_KEY || "";
+                if (!groqKey) {
+                    api.sendMessage("GROQ_API_KEY not configured.", threadID, ()=>{});
+                    return;
+                }
+                axios.post("https://api.groq.com/openai/v1/chat/completions", {
+                    model: "llama3-8b-8192",
+                    messages: [
+                        { role: "system", content: "You are a helpful assistant. Keep responses concise and direct." },
+                        { role: "user", content: question }
+                    ],
+                    max_tokens: 400,
+                }, {
+                    headers: {
+                        "Authorization": `Bearer ${groqKey}`,
+                        "Content-Type": "application/json"
+                    },
+                    timeout: 20000
+                }).then(r => {
+                    const reply = r.data?.choices?.[0]?.message?.content || "No response.";
+                    api.sendMessage(`\u{1F916} ${reply.trim()}`, threadID, (err, info) => {
+                        if (!err && info) lastBotMsgID[threadID] = info.messageID;
+                        send("totalReply");
+                    });
+                }).catch(e => {
+                    api.sendMessage(`GPT error: ${e.message || "Failed to get response."}`, threadID, ()=>{});
+                });
+                return;
+            }
+
             if (cmd==="chatgpt") {
                 chatGptEnabled[threadID] = !chatGptEnabled[threadID];
                 if (chatGptEnabled[threadID]) {
-                    api.sendMessage("CHAT GPT MODE ON!", threadID, (err, info) => {
+                    api.sendMessage("\u{1F916} AI mode ON — reply to my messages or DM me to chat.", threadID, (err, info) => {
                         if (!err && info) lastBotMsgID[threadID] = info.messageID;
                     });
                 } else {
-                    api.sendMessage("Chat GPT mode disabled.", threadID, ()=>{});
+                    api.sendMessage("AI mode disabled.", threadID, ()=>{});
                 }
                 return;
             }
 
             if (cmd==="help") {
                 const h = [
-                    `DUMMYL BOT  |  prefix: ${PREFIX}  |  ${BOT_LABEL}`,
-                    "",
-                    "LOOP",
-                    "  .              toggle loop on/off",
-                    "  . <uid>        PM loop toggle",
-                    "  !stop          stop all loops",
-                    "  !looppm <uid>  start PM loop",
-                    "  !stoppm <uid>  stop PM loop",
-                    "  !schedule <sec> <msg>",
-                    "",
-                    "AUTO-RESPOND  (admin)",
-                    "  !on / !off     enable/disable",
-                    "  !mute / !unmute",
-                    "  !broadcast <text>",
-                    "",
-                    "GROUP  (admin)",
-                    "  !nn <name>  !nn1 <uid> <n>  !clearnn",
-                    "  !cg <name>  !uncg",
-                    "  !banner [url]  !unbanner",
-                    "  !kick / !add / !promote / !demote <uid>",
-                    "  !emoji  !color <name>  !freeze  !unfreeze",
-                    "  !gmute / !gunmute <uid>",
-                    "  !perms <uid> <time>  !revoke",
-                    "  !lock  !members  !antirestrict  !forward",
-                    "",
-                    "VOICE & MUSIC",
-                    "  !vm <text>        chipmunk voice msg",
-                    "  !vmpm <uid> <text>",
-                    "  !p <song/url>     play YouTube audio",
-                    "",
-                    "TOOLS",
-                    "  !say  !spam  !count  !react  !seen",
-                    "  !id  !myid  !info  !status  !test",
-                    "  !gp [on/off]   profile guard (FB shield)",
-                    "",
-                    "FUN",
-                    "  !flip  !roll [n]  !8ball <q>",
-                    "  !pick a|b  !reverse  !shout  !mock",
-                    "  !clap  !timer <s>  !repeat <n> <msg>",
+                    `╔══════════════════════════════╗`,
+                    `║   DUMMYL BOT  ·  ${BOT_LABEL.slice(0,10).padEnd(10)}  ║`,
+                    `║   prefix: ${PREFIX}  ·  by cozy         ║`,
+                    `╚══════════════════════════════╝`,
+                    ``,
+                    `◈ LOOP`,
+                    `  ⟡  .               toggle loop on/off`,
+                    `  ⟡  . <uid/name>    toggle PM loop`,
+                    `  ⟡  !stop           stop loop here`,
+                    `  ⟡  !looppm <uid>   start PM loop`,
+                    `  ⟡  !stoppm <uid>   stop PM loop`,
+                    `  ⟡  !schedule <s> <msg>`,
+                    ``,
+                    `◈ AUTO-RESPOND`,
+                    `  ⟡  !on / !off      enable / disable`,
+                    `  ⟡  !mute / !unmute`,
+                    `  ⟡  !broadcast <text>`,
+                    ``,
+                    `◈ GROUP TOOLS`,
+                    `  ⟡  !nn <name>      set nickname (all)`,
+                    `  ⟡  !nn1 <uid> <n>  set nickname (one)`,
+                    `  ⟡  !clearnn        clear nicknames`,
+                    `  ⟡  !cg / !uncg     lock group name`,
+                    `  ⟡  !banner [url]   lock banner`,
+                    `  ⟡  !kick / !add / !promote / !demote`,
+                    `  ⟡  !emoji / !color <name>`,
+                    `  ⟡  !freeze / !unfreeze`,
+                    `  ⟡  !gmute / !gunmute <uid>`,
+                    `  ⟡  !perms <uid> <time>  !revoke`,
+                    `  ⟡  !lock  !members  !forward`,
+                    ``,
+                    `◈ AI`,
+                    `  ⟡  !gpt <question> one-shot AI reply`,
+                    `  ⟡  !chatgpt        toggle AI chat mode`,
+                    ``,
+                    `◈ VOICE & MUSIC`,
+                    `  ⟡  !vm <text>      chipmunk TTS`,
+                    `  ⟡  !vmpm <uid> <text>`,
+                    `  ⟡  !p <song/url>   play YouTube audio`,
+                    ``,
+                    `◈ TOOLS`,
+                    `  ⟡  !say  !spam  !count  !react  !seen`,
+                    `  ⟡  !id  !myid  !info  !status  !test`,
+                    `  ⟡  !gp [on/off]   profile guard`,
+                    `  ⟡  !mwa <ip>       IP lookup`,
+                    `  ⟡  !scan <fb url>  profile scan`,
+                    ``,
+                    `◈ FUN`,
+                    `  ⟡  !flip  !roll [n]  !8ball <q>`,
+                    `  ⟡  !pick a|b  !reverse  !shout`,
+                    `  ⟡  !mock  !clap  !timer <s>`,
+                    `  ⟡  !repeat <n> <msg>`,
+                    ``,
+                    `▸ type !help in chat to see this again`,
                 ].join("\n");
                 api.sendMessage(h, threadID, ()=>{});
                 return;
