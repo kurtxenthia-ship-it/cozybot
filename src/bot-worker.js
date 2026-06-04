@@ -397,30 +397,47 @@ function startBot() {
     catch(e) { log("error","Cannot read fbstate: "+e.message); send("status",{loggedIn:false,reconnecting:false}); return; }
 
     const selectedUA = getRandomUA();
-    log("info", `Connecting... (protection active)`);
+    log("info", `Connecting...`);
+    send("status", { loggedIn: false, reconnecting: true });
 
-    login(appState, {
-        online: true,
-        selfListen: true,
-        listenEvents: true,
-        autoMarkDelivery: false,
-        logLevel: "silent",
-        userAgent: selectedUA,
-        forceLogin: true,
-    }, (err, api) => {
+    let loginDone = false;
+    const loginTimeout = setTimeout(() => {
+        if (!loginDone) {
+            loginDone = true;
+            log("error", "Login timed out after 90s — retrying...");
+            send("status", { loggedIn: false, reconnecting: false });
+            scheduleReconnect();
+        }
+    }, 90000);
+
+    let loginErr;
+    try {
+        login(appState, {
+            online: false,
+            selfListen: false,
+            listenEvents: true,
+            autoMarkDelivery: false,
+            logLevel: "warn",
+            userAgent: selectedUA,
+            forceLogin: false,
+        }, (err, api) => {
+            if (loginDone) return;
+            loginDone = true;
+            clearTimeout(loginTimeout);
+
         if (err) {
-            const msg = err.message||JSON.stringify(err);
+            const msg = err.message||JSON.stringify(err)||String(err);
             log("error","Login failed: "+msg);
-            const isCheckpoint = msg.includes("Checkpoint")||msg.includes("checkpoint")||msg.includes("confirm")||msg.includes("verify")||msg.includes("human");
-            const isExpired = msg.includes("Error retrieving userID")||msg.includes("expired")||msg.includes("locked");
+            const isCheckpoint = /checkpoint|confirm|verify|human|unusual/i.test(msg);
+            const isExpired = /retrieving userID|expired|locked|invalid.*appstate|appstate.*invalid/i.test(msg);
             if (isCheckpoint) {
-                log("warn", "Account checkpoint detected — confirm your identity on Facebook, then update cookie.");
-                send("alert", { alertType:"warn", message:"Account checkpoint! Go to Facebook and verify your identity, then re-paste your cookie." });
+                log("warn", "Account checkpoint — verify your identity on Facebook, then re-paste your cookie.");
+                send("alert", { alertType:"warn", message:"Account checkpoint! Verify on Facebook then re-paste your cookie." });
                 send("status",{loggedIn:false,reconnecting:false,expired:true});
                 return;
             }
             if (isExpired && reconnectDelay>=MAX_RECONNECT) {
-                log("error","Session expired. Update cookie from dashboard.");
+                log("error","Session expired. Re-paste your cookie from the Cookie tab.");
                 send("status",{loggedIn:false,reconnecting:false,expired:true});
                 return;
             }
@@ -974,6 +991,12 @@ function startBot() {
             }
         }
     });
+    } catch(e) {
+        loginDone = true;
+        clearTimeout(loginTimeout);
+        log("error", "Login threw: "+(e.message||e));
+        scheduleReconnect();
+    }
 }
 
 process.on("uncaughtException", err=>log("error","Uncaught: "+(err.message||err)));
