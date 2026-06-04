@@ -412,7 +412,7 @@ function startBot() {
 
     let loginErr;
     try {
-        login(appState, {
+        login({ appState }, {
             online: false,
             selfListen: false,
             listenEvents: true,
