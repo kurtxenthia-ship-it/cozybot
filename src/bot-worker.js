@@ -408,9 +408,11 @@ function startBot() {
     try {
         login(appState, {
             online: false,
-            selfListen: false,
+            selfListen: true,
             listenEvents: true,
             autoMarkDelivery: false,
+            autoMarkRead: false,
+            autoReconnect: false,
             logLevel: "warn",
             userAgent: selectedUA,
             forceLogin: true,
@@ -466,13 +468,22 @@ function startBot() {
             if (err) {
                 clearInterval(keepalive);
                 stopAllLoops(null);
-                log("error",`Listener error: ${err.error||err.message||err}.`);
+                const errMsg = err.error||err.message||JSON.stringify(err)||String(err);
+                console.error(`[${BOT_LABEL}] Listener error: ${errMsg}`);
+                log("error",`Listener error: ${errMsg}`);
                 send("status",{loggedIn:false});
                 scheduleReconnect();
                 return;
             }
+            if (!event) return;
+            if (event.type === "message" || event.type === "message_reply") {
+                console.log(`[${BOT_LABEL}] MSG from=${event.senderID} body="${(event.body||"").slice(0,50)}" group=${event.isGroup}`);
+            }
             try { handleEvent(api, event, frozenThreads, gmutedUsers); }
-            catch(e) { log("error","Event crash: "+(e.message||e)); }
+            catch(e) {
+                console.error(`[${BOT_LABEL}] Event crash: ${e.message||e}`);
+                log("error","Event crash: "+(e.message||e));
+            }
         });
 
         process.removeAllListeners("message");
