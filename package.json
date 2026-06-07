@@ -24,7 +24,6 @@
     "npmlog": "^7.0.1",
     "request": "^2.88.2",
     "websocket-stream": "^5.5.2",
-    "ws3-fca": "./ws3-fca",
     "youtube-search-api": "^2.0.1"
   },
   "devDependencies": {

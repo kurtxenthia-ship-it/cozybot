@@ -318,55 +318,49 @@ function scheduleReconnect() {
     reconnectDelay = Math.min(reconnectDelay*2, MAX_RECONNECT);
 }
 
-async function yt1sSearch(query) {
-    const isUrl = /youtu(?:be\.com|\.be)/i.test(query);
-    const q     = isUrl ? query : query;
-    const API   = "https://yt1s.com/api";
-
-    const search = await axios.post(`${API}/ajaxSearch/index`,
-        `q=${encodeURIComponent(q)}&vt=mp3`,
-        { timeout: 20000 }
-    );
-    const { vid, links, mess, t: title } = search.data;
-    if (mess) throw new Error(mess || "No results found.");
-    if (!vid || !links || !links.mp3) throw new Error("No audio links returned.");
-
-    const type     = links.mp3;
-    const typeKeys = Object.keys(type);
-    if (!typeKeys.length) throw new Error("No quality options found.");
-    const hq = typeKeys[typeKeys.length - 1];
-    const k  = type[hq].k;
-
-    const convert = await axios.post(`${API}/ajaxConvert/convert`,
-        `vid=${vid}&k=${k}`,
-        { timeout: 30000 }
-    );
-    const { dlink, title: convTitle, c_status } = convert.data;
-    if (!dlink) throw new Error("Conversion failed, no download link.");
-
-    return { title: convTitle || title || query, downloadUrl: dlink };
-}
-
-function playCommand(api, query, threadID) {
+async function playCommand(api, query, threadID) {
     if (!query) { api.sendMessage("Usage: !p <song name or YouTube URL>", threadID, ()=>{}); return; }
-    api.sendMessage(`Searching: "${query.slice(0,60)}"...`, threadID, ()=>{});
 
-    yt1sSearch(query).then(({ title, downloadUrl }) => {
-        return axios.get(downloadUrl, { responseType: "stream", timeout: 60000 });
-    }).then(dlRes => {
-        const titleForMsg = query.slice(0, 60);
+    const ytdl = require("@distube/ytdl-core");
+    const ytSearch = require("youtube-search-api");
+    const isUrl = /youtu(?:be\.com|\.be)/i.test(query);
+    let videoUrl = query;
+
+    try {
+        if (!isUrl) {
+            api.sendMessage(`Searching: "${query.slice(0,60)}"...`, threadID, ()=>{});
+            const results = await ytSearch.GetListByKeyword(query, false, 1);
+            const items = results && results.items;
+            if (!items || !items.length) {
+                api.sendMessage("No results found for: " + query.slice(0,60), threadID, ()=>{});
+                return;
+            }
+            videoUrl = "https://www.youtube.com/watch?v=" + items[0].id;
+        } else {
+            api.sendMessage("Getting audio from URL...", threadID, ()=>{});
+        }
+
+        const info = await ytdl.getInfo(videoUrl);
+        const title = info.videoDetails.title || query;
+
+        const audioStream = ytdl(videoUrl, {
+            filter: "audioonly",
+            quality: "lowestaudio",
+            requestOptions: { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" } }
+        });
+
         api.sendMessage(
-            { body: `Now playing: ${titleForMsg}`, attachment: dlRes.data },
+            { body: `Now playing: ${title.slice(0,80)}`, attachment: audioStream },
             threadID,
             (err) => {
                 if (err) log("warn", `!p send error: ${err}`);
                 else send("totalReply");
             }
         );
-    }).catch(e => {
-        api.sendMessage(`Failed to play. ${e.message || "Try a different song or direct YouTube URL."}`, threadID, ()=>{});
+    } catch(e) {
+        api.sendMessage(`Failed to play. ${(e.message || "Try a different song or direct YouTube URL.").slice(0,200)}`, threadID, ()=>{});
         log("warn", `!p error: ${e.message}`);
-    });
+    }
 }
 
 function ttsChipmunk(text, lang, threadID, api, targetID) {
@@ -419,7 +413,7 @@ function startBot() {
             autoMarkDelivery: false,
             logLevel: "warn",
             userAgent: selectedUA,
-            forceLogin: false,
+            forceLogin: true,
         }, (err, api) => {
             if (loginDone) return;
             loginDone = true;
