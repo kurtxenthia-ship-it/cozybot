@@ -29,5 +29,9 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.0"
+  },
+  "overrides": {
+    "form-data": "^4.0.5",
+    "es5-ext": "0.10.53"
   }
 }
