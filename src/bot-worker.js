@@ -1,6 +1,6 @@
 "use strict";
 
-const { login } = require("fca-unofficial");
+const { login } = require("../ws3-fca");
 const fs   = require("fs");
 const path = require("path");
 const axios = require("axios");
@@ -406,7 +406,7 @@ function startBot() {
 
     let loginErr;
     try {
-        login({ appState }, {
+        login(appState, {
             online: false,
             selfListen: false,
             listenEvents: true,
