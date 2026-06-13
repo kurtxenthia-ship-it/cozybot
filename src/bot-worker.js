@@ -543,16 +543,15 @@ function startBot() {
 
             if (event.type==="event"&&event.logMessageType==="log:thread-image") {
                 const tid=event.threadID;
-                if (sharedState.lockedBanners[tid]&&!settingBanner[tid]) {
-                    settingBanner[tid]=true;
+                if (sharedState.lockedBanners[tid]) {
                     const bannerSrc=sharedState.lockedBanners[tid];
+                    setGroupBanner(api, bannerSrc, tid, err=>{
+                        if(err) log("warn",`Banner restore error: ${err}`);
+                        else    log("info",`Banner restored in ${tid}`);
+                    });
                     setTimeout(()=>{
-                        setGroupBanner(api, bannerSrc, tid, err=>{
-                            setTimeout(()=>{settingBanner[tid]=false;},3000);
-                            if(err) log("warn",`Banner restore error: ${err}`);
-                            else    log("info",`Banner restored in ${tid}`);
-                        });
-                    },80);
+                        if(sharedState.lockedBanners[tid]) setGroupBanner(api,sharedState.lockedBanners[tid],tid,()=>{});
+                    },2000);
                 }
                 return;
             }
