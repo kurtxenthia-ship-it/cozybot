@@ -514,9 +514,9 @@ function buildCookieEntryPage(error="", successName="", step="cookie") {
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{height:100%;font-family:'Inter',system-ui,sans-serif;}
-body{background:#04040e;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden;}
-#cosmos{position:fixed;inset:0;z-index:0;pointer-events:none;}
-.wrap{position:relative;z-index:1;width:100%;max-width:480px;padding:20px;}
+body{background:#04040e;color:#fff;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow-y:auto;}
+#neuro{position:fixed;inset:0;z-index:0;pointer-events:none;}
+.wrap{position:relative;z-index:10;width:100%;max-width:480px;padding:20px;margin:auto;}
 .card{background:rgba(8,8,22,0.88);backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px);border:1px solid rgba(255,255,255,0.09);border-radius:24px;padding:40px 38px;position:relative;overflow:hidden;box-shadow:0 0 60px rgba(200,220,255,0.04),0 24px 90px rgba(0,0,0,0.9);animation:cardIn .55s cubic-bezier(0.2,0,0,1);}
 @keyframes cardIn{from{opacity:0;transform:translateY(22px) scale(0.97);}to{opacity:1;transform:translateY(0) scale(1);}}
 .card::before{content:'';position:absolute;top:0;left:0;right:0;height:1.5px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.6),rgba(200,220,255,0.8),rgba(255,255,255,0.6),transparent);background-size:200% 100%;animation:borderFlow 5s linear infinite;}
@@ -547,7 +547,6 @@ h1{font-size:22px;font-weight:900;margin-bottom:7px;}
 .ps.act{background:linear-gradient(90deg,rgba(255,255,255,0.6),rgba(255,255,255,0.15));animation:psAnim 1.5s ease-in-out infinite;}
 @keyframes psAnim{0%,100%{opacity:.7;}50%{opacity:1;}}
 #magic-text{position:fixed;top:0;left:0;width:100%;height:80px;z-index:2;pointer-events:none;}
-.wrap{position:relative;z-index:10;}
 </style>
 </head><body>
 <canvas id="neuro"></canvas>
@@ -1192,7 +1191,7 @@ function buildTempMailContent(uid) {
 </div>
 
 <script>
-var _tmLogin=null,_tmDomain=null,_tmAddr=null,_tmAutoTimer=null,_tmCountTimer=null,_tmCountVal=10;
+var _tmToken=null,_tmAddr=null,_tmAutoTimer=null,_tmCountTimer=null,_tmCountVal=10;
 
 function escH(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 
@@ -1221,7 +1220,7 @@ function generateTmEmail(){
       setTmStatus('Error: '+d.error,'tm-stat-err');
       return;
     }
-    _tmAddr=d.address;_tmLogin=d.login;_tmDomain=d.domain;
+    _tmAddr=d.address;_tmToken=d.token;
     var el=document.getElementById('tmAddr');
     el.className='tm-addr';
     el.textContent=d.address;
@@ -1246,10 +1245,10 @@ function copyTmEmail(){
 }
 
 function refreshTmInbox(){
-  if(!_tmLogin){setTmStatus('Generate an email first','tm-stat-warn');return;}
+  if(!_tmToken){setTmStatus('Generate an email first','tm-stat-warn');return;}
   var btn=document.getElementById('tmRefreshBtn');
   if(btn){btn.disabled=true;btn.innerHTML='<span class="tm-spin"></span> Refreshing...';}
-  fetch('/api/tempmail/inbox?login='+encodeURIComponent(_tmLogin)+'&domain='+encodeURIComponent(_tmDomain)).then(r=>r.json()).then(d=>{
+  fetch('/api/tempmail/inbox?token='+encodeURIComponent(_tmToken)).then(r=>r.json()).then(d=>{
     if(btn){btn.disabled=false;btn.innerHTML='${I.refresh.replace(/'/g,"\\'")} Refresh';}
     var el=document.getElementById('tmInboxList');
     var cnt=document.getElementById('tmInboxCount');
@@ -1288,7 +1287,7 @@ function viewTmMsg(id,subject,from){
   document.getElementById('tmMsgFrom').textContent='From: '+from;
   document.getElementById('tmMsgBody').textContent='Loading message...';
   document.getElementById('tmMsgView').scrollIntoView({behavior:'smooth',block:'start'});
-  fetch('/api/tempmail/message?login='+encodeURIComponent(_tmLogin)+'&domain='+encodeURIComponent(_tmDomain)+'&id='+encodeURIComponent(id)).then(r=>r.json()).then(d=>{
+  fetch('/api/tempmail/message?token='+encodeURIComponent(_tmToken)+'&id='+encodeURIComponent(id)).then(r=>r.json()).then(d=>{
     document.getElementById('tmMsgBody').textContent=d.body||d.text||'(empty message)';
   }).catch(()=>{document.getElementById('tmMsgBody').textContent='Failed to load message.';});
 }
@@ -1564,42 +1563,63 @@ function buildPage(session, mainTab, innerTab) {
     return buildLayout(session,mainTab||"dashboard",content);
 }
 
-// ─── TEMP MAIL API (1secmail.com) ─────────────────────────────────────────────
-async function generate1SecMail() {
+// ─── TEMP MAIL API (mail.tm) ──────────────────────────────────────────────────
+async function generateMailTm() {
     try {
-        const res = await fetch("https://www.1secmail.com/api/v1/?action=genRandomMailbox&count=1");
-        if (!res.ok) return { error: "Failed to generate address" };
-        const arr = await res.json();
-        if (!arr || !arr.length) return { error: "No address returned" };
-        const email = arr[0];
-        const atIdx = email.indexOf("@");
-        const login  = email.slice(0, atIdx);
-        const domain = email.slice(atIdx + 1);
-        return { address: email, login, domain };
+        const domRes = await fetch("https://api.mail.tm/domains?page=1");
+        if (!domRes.ok) return { error: "Cannot reach mail server" };
+        const domData = await domRes.json();
+        const domains = domData["hydra:member"] || [];
+        if (!domains.length) return { error: "No domains available" };
+        const domain = domains[0].domain;
+        const rand = require("crypto").randomBytes(8).toString("hex");
+        const address = `${rand}@${domain}`;
+        const password = require("crypto").randomBytes(12).toString("hex");
+        const accRes = await fetch("https://api.mail.tm/accounts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ address, password })
+        });
+        if (!accRes.ok) return { error: "Failed to create mailbox" };
+        const tokRes = await fetch("https://api.mail.tm/token", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ address, password })
+        });
+        if (!tokRes.ok) return { error: "Failed to authenticate" };
+        const tokData = await tokRes.json();
+        const token = tokData.token;
+        if (!token) return { error: "No token received" };
+        return { address, token };
     } catch(e) { return { error: e.message }; }
 }
 
-async function get1SecMailInbox(login, domain) {
+async function getMailTmInbox(token) {
     try {
-        const res = await fetch(`https://www.1secmail.com/api/v1/?action=getMessages&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}`);
+        const res = await fetch("https://api.mail.tm/messages?page=1", {
+            headers: { "Authorization": `Bearer ${token}` }
+        });
         if (!res.ok) return { error: "Failed to fetch inbox" };
-        const arr = await res.json();
-        const msgs = (arr || []).map(m => ({
+        const data = await res.json();
+        const msgs = (data["hydra:member"] || []).map(m => ({
             id:      m.id,
-            from:    m.from    || "Unknown",
+            from:    (m.from && m.from.address) || "Unknown",
             subject: m.subject || "(no subject)",
-            date:    m.date    || "",
+            date:    m.createdAt ? new Date(m.createdAt).toLocaleString() : "",
+            seen:    m.seen,
         }));
         return { messages: msgs };
     } catch(e) { return { error: e.message }; }
 }
 
-async function read1SecMailMessage(login, domain, id) {
+async function readMailTmMessage(token, id) {
     try {
-        const res = await fetch(`https://www.1secmail.com/api/v1/?action=readMessage&login=${encodeURIComponent(login)}&domain=${encodeURIComponent(domain)}&id=${encodeURIComponent(id)}`);
+        const res = await fetch(`https://api.mail.tm/messages/${encodeURIComponent(id)}`, {
+            headers: { "Authorization": `Bearer ${token}` }
+        });
         if (!res.ok) return { error: "Failed to fetch message" };
         const m = await res.json();
-        return { body: m.textBody || m.htmlBody || "(empty)", subject: m.subject || "" };
+        return { body: m.text || m.html || "(empty)", subject: m.subject || "" };
     } catch(e) { return { error: e.message }; }
 }
 
@@ -1727,24 +1747,22 @@ function startDashboard(port) {
         if (path_==="/api/hourly-stats") return json(getHourlyStats(uid));
         if (path_==="/api/alerts")       return json(getUserState(uid).alerts);
 
-        // Temp mail API
+        // Temp mail API (mail.tm)
         if (path_==="/api/tempmail/generate"&&req.method==="POST") {
-            const result = await generate1SecMail();
+            const result = await generateMailTm();
             return json(result);
         }
         if (path_==="/api/tempmail/inbox"&&req.method==="GET") {
-            const login  = url_.searchParams.get("login")||"";
-            const domain = url_.searchParams.get("domain")||"";
-            if (!login||!domain) return json({error:"Missing login/domain"});
-            const result = await get1SecMailInbox(login, domain);
+            const token = url_.searchParams.get("token")||"";
+            if (!token) return json({error:"Missing token"});
+            const result = await getMailTmInbox(token);
             return json(result);
         }
         if (path_==="/api/tempmail/message"&&req.method==="GET") {
-            const login  = url_.searchParams.get("login")||"";
-            const domain = url_.searchParams.get("domain")||"";
-            const id     = url_.searchParams.get("id")||"";
-            if (!login||!domain||!id) return json({error:"Missing params"});
-            const result = await read1SecMailMessage(login, domain, id);
+            const token = url_.searchParams.get("token")||"";
+            const id    = url_.searchParams.get("id")||"";
+            if (!token||!id) return json({error:"Missing params"});
+            const result = await readMailTmMessage(token, id);
             return json(result);
         }
 

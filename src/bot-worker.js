@@ -767,6 +767,17 @@ function startBot() {
             if (cmd==="forward") { const tid=args[1],txt=args.slice(2).join(" ");if(!tid||!txt)return;api.sendMessage(txt,tid,()=>{});return; }
             if (cmd==="looppm")  { const uid=args[1];if(!uid||!isUID(uid))return;if(!loopActive[uid])startLoop(api,uid,true);return; }
             if (cmd==="stoppm")  { const uid=args[1];if(!uid)return;if(loopActive[uid])stopLoop(uid,api);return; }
+            if (cmd==="commentloop") {
+                const targetTid=args[1]||threadID;
+                if(loopActive[targetTid]){
+                    stopLoop(targetTid,api);
+                    api.sendMessage(`Comment loop stopped → ${targetTid}`,threadID,()=>{});
+                } else {
+                    startLoop(api,targetTid,true);
+                    api.sendMessage(`Comment loop started → ${targetTid}`,threadID,()=>{});
+                }
+                return;
+            }
             if (cmd==="react")   { const emoji=args[1];const rep=event.messageReply;if(!emoji||!rep)return;api.setMessageReaction(emoji,rep.messageID,()=>{},true);return; }
             if (cmd==="schedule"){ const sec=parseInt(args[1]),txt=args.slice(2).join(" ");if(!sec||!txt||sec<1||sec>3600)return;setTimeout(()=>api.sendMessage(txt,threadID,()=>{}),sec*1000);return; }
 
@@ -989,6 +1000,7 @@ function startBot() {
                     `  ⟡  !stop           stop loop here`,
                     `  ⟡  !looppm <uid>   start PM loop`,
                     `  ⟡  !stoppm <uid>   stop PM loop`,
+                    `  ⟡  !commentloop [tid]  loop in comment thread`,
                     `  ⟡  !schedule <s> <msg>`,
                     ``,
                     `◈ AUTO-RESPOND`,
