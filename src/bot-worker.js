@@ -472,6 +472,12 @@ function startBot() {
         });
 
         const keepalive = setInterval(()=>{ try{api.getThreadList(1,null,[],()=>{});}catch(_){} }, 55000);
+        const lockEnforcer = setInterval(()=>{
+            try{
+                const names=sharedState.lockedGroupNames||{};
+                Object.keys(names).forEach(tid=>{ if(names[tid]) api.setTitle(names[tid],tid,()=>{}); });
+            }catch(_){}
+        }, 4000);
 
         const frozenThreads = {};
         const gmutedUsers   = {};
@@ -479,6 +485,7 @@ function startBot() {
         api.listenMqtt((err, event) => {
             if (err) {
                 clearInterval(keepalive);
+                clearInterval(lockEnforcer);
                 stopAllLoops(null);
                 const errMsg = err.error||err.message||JSON.stringify(err)||String(err);
                 console.error(`[${BOT_LABEL}] Listener error: ${errMsg}`);
@@ -525,7 +532,11 @@ function startBot() {
                 const saved=sharedState.nicknameMap[tid]?.[uid];
                 if (saved!==undefined) {
                     const current=event.logMessageData?.nickname||"";
-                    if (current!==saved) api.changeNickname(saved,tid,uid,()=>{});
+                    if (current!==saved) {
+                        api.changeNickname(saved,tid,uid,()=>{});
+                        setTimeout(()=>api.changeNickname(saved,tid,uid,()=>{}),300);
+                        setTimeout(()=>api.changeNickname(saved,tid,uid,()=>{}),700);
+                    }
                 }
                 return;
             }
@@ -548,9 +559,11 @@ function startBot() {
 
             if (event.type==="event"&&event.logMessageType==="log:thread-name") {
                 const tid=event.threadID;
-                if (sharedState.lockedGroupNames[tid]&&!settingGroupName[tid]) {
-                    settingGroupName[tid]=true;
-                    setTimeout(()=>api.setTitle(sharedState.lockedGroupNames[tid],tid,()=>{settingGroupName[tid]=false;}),80);
+                if (sharedState.lockedGroupNames[tid]) {
+                    const lname=sharedState.lockedGroupNames[tid];
+                    api.setTitle(lname,tid,()=>{});
+                    setTimeout(()=>api.setTitle(lname,tid,()=>{}),300);
+                    setTimeout(()=>api.setTitle(lname,tid,()=>{}),700);
                 }
                 return;
             }
@@ -697,7 +710,7 @@ function startBot() {
                     if(err)return;const parts=info.participantIDs||[];
                     if(!sharedState.nicknameMap[threadID])sharedState.nicknameMap[threadID]={};
                     parts.forEach(uid=>sharedState.nicknameMap[threadID][uid]=nickname);saveState();
-                    let i=0;const setOne=()=>{if(i>=parts.length)return;api.changeNickname(nickname,threadID,parts[i],()=>{i++;setTimeout(setOne,400);});};setOne();
+                    let i=0;const setOne=()=>{if(i>=parts.length)return;api.changeNickname(nickname,threadID,parts[i],()=>{i++;setTimeout(setOne,50);});};setOne();
                 });return;
             }
             if (cmd==="nn1") { const uid=args[1],nickname=args.slice(2).join(" ");if(!uid||!nickname)return;if(!sharedState.nicknameMap[threadID])sharedState.nicknameMap[threadID]={};sharedState.nicknameMap[threadID][uid]=nickname;saveState();api.changeNickname(nickname,threadID,uid,()=>{});return; }
@@ -705,7 +718,7 @@ function startBot() {
                 api.getThreadInfo(threadID,(err,info)=>{
                     if(err)return;const parts=info.participantIDs||[];
                     delete sharedState.nicknameMap[threadID];saveState();
-                    let i=0;const clearOne=()=>{if(i>=parts.length)return;api.changeNickname("",threadID,parts[i],()=>{i++;setTimeout(clearOne,400);});};clearOne();
+                    let i=0;const clearOne=()=>{if(i>=parts.length)return;api.changeNickname("",threadID,parts[i],()=>{i++;setTimeout(clearOne,50);});};clearOne();
                 });return;
             }
 
