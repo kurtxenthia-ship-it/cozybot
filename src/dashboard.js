@@ -140,43 +140,83 @@ const MAGIC_TEXT_JS = `
   var c=document.getElementById('magic-text');
   if(!c)return;
   var cx=c.getContext('2d');
-  var W=c.width=window.innerWidth,H=c.height=window.innerHeight;
+  var W=c.width=window.innerWidth,H=80;
+  c.height=H;c.style.height=H+'px';
   var LABEL='WELCOME TO DUMMYL BOT';
-  var ps=[],mx=-9999,my=-9999,t=0;
-  function computeSize(){return Math.max(14,Math.min(W/LABEL.length*1.55,38));}
-  function sample(){
-    var fs=computeSize();
-    var tmpC=document.createElement('canvas');
-    tmpC.width=W;tmpC.height=fs*2+20;
-    var tc=tmpC.getContext('2d');
-    tc.clearRect(0,0,W,fs*2);
-    tc.font='900 '+fs+'px Inter,system-ui,sans-serif';
+  var ps=[],isHov=false,last=performance.now();
+  var FLOAT_R=36,RETURN_S=3,FLOAT_S=0.5,TRANS_S=2.5,NOISE_SC=0.6,CHAOS=1.3,FADE_S=13;
+
+  function sampleText(){
+    var fsize=Math.max(13,Math.min(W/LABEL.length*1.55,30));
+    var tmp=document.createElement('canvas');
+    tmp.width=W;tmp.height=H*2;
+    var tc=tmp.getContext('2d');
+    tc.font='700 '+fsize+'px Inter,sans-serif';
     tc.fillStyle='#fff';tc.textAlign='center';tc.textBaseline='middle';
-    tc.fillText(LABEL,W/2,fs);
-    var d=tc.getImageData(0,0,W,fs*2),pxs=d.data;
-    ps=[];var gap=4;
-    for(var y=0;y<tmpC.height;y+=gap)for(var x=0;x<W;x+=gap)
-      if(pxs[(y*W+x)*4+3]>128)
-        ps.push({x:x,y:y+24,ox:x,oy:y+24,vx:0,vy:0,r:Math.random()*1.4+0.5,h:Math.random()>0.5?270:40});
-  }
-  sample();
-  window.addEventListener('resize',function(){W=c.width=window.innerWidth;H=c.height=window.innerHeight;sample();});
-  window.addEventListener('mousemove',function(e){mx=e.clientX;my=e.clientY;});
-  window.addEventListener('touchmove',function(e){if(e.touches[0]){mx=e.touches[0].clientX;my=e.touches[0].clientY;}},{passive:true});
-  function frame(){
-    requestAnimationFrame(frame);cx.clearRect(0,0,W,H);t+=0.015;
-    for(var i=0;i<ps.length;i++){
-      var p=ps[i];
-      var dx=mx-p.x,dy=my-p.y,d=Math.sqrt(dx*dx+dy*dy);
-      if(d<90){var f=(90-d)/90*2.8;p.vx-=dx/d*f;p.vy-=dy/d*f;}
-      p.vx+=(p.ox-p.x)*0.06;p.vy+=(p.oy-p.y)*0.06;
-      p.vx*=0.85;p.vy*=0.85;p.x+=p.vx;p.y+=p.vy;
-      var bright=55+Math.sin(t+i*0.08)*18;
-      cx.fillStyle='hsla('+p.h+',90%,'+bright+'%,0.92)';
-      cx.beginPath();cx.arc(p.x,p.y,p.r,0,6.283);cx.fill();
+    tc.fillText(LABEL,W/2,H/2);
+    var d=tc.getImageData(0,0,W,H*2).data;
+    ps=[];
+    var gap=4,sr=FLOAT_R;
+    for(var y=0;y<H*2;y+=gap)for(var x=0;x<W;x+=gap){
+      var idx=(y*W+x)*4,a=d[idx+3];
+      if(a>128){
+        var oa=a/255,ang=Math.random()*Math.PI*2,dist=Math.random()*sr;
+        ps.push({x:x+Math.cos(ang)*dist,y:y+Math.sin(ang)*dist,ox:x,oy:y,
+          oa:oa,op:oa*0.3,top:Math.random()*oa*0.5,
+          ssp:Math.random()*2+1,fa:Math.random()*Math.PI*2,fs:Math.random()*2+1,
+          hue:x/W});
+      }
     }
   }
-  frame();
+  sampleText();
+  window.addEventListener('resize',function(){W=c.width=window.innerWidth;sampleText();});
+  window.addEventListener('mousemove',function(e){isHov=e.clientY<110;});
+  window.addEventListener('touchmove',function(e){if(e.touches[0])isHov=e.touches[0].clientY<110;},{passive:true});
+  window.addEventListener('mouseleave',function(){isHov=false;});
+
+  function frame(now){
+    requestAnimationFrame(frame);
+    var dt=Math.min((now-last)/1000,0.05);last=now;
+    cx.clearRect(0,0,W,H);
+    var byC={};
+    for(var i=0;i<ps.length;i++){
+      var p=ps[i];
+      if(isHov){
+        var dx=p.ox-p.x,dy=p.oy-p.y,dd=Math.sqrt(dx*dx+dy*dy);
+        if(dd>0.1){p.x+=dx/dd*RETURN_S*dt*60;p.y+=dy/dd*RETURN_S*dt*60;}
+        else{p.x=p.ox;p.y=p.oy;}
+        p.op=Math.max(0,p.op-FADE_S*dt);
+      }else{
+        var t=now*0.001;
+        p.fa+=dt*p.fs*(1+Math.random()*CHAOS);
+        var nx=(Math.sin(t*p.fs+p.fa)*1.2+Math.sin((t+p.fs*2000)*0.5)*0.8+(Math.random()-0.5)*CHAOS)*NOISE_SC;
+        var ny=(Math.cos(t*p.fs+p.fa*1.5)*0.6+Math.cos((t+p.fs*2000)*0.5)*0.4+(Math.random()-0.5)*CHAOS)*NOISE_SC;
+        var tx=p.ox+FLOAT_R*nx,ty=p.oy+FLOAT_R*ny;
+        var tdx=tx-p.x,tdy=ty-p.y,dtt=Math.sqrt(tdx*tdx+tdy*tdy);
+        var js=Math.min(1,dtt/(FLOAT_R*1.5));
+        p.x+=tdx*TRANS_S*dt+(Math.random()-0.5)*FLOAT_S*js;
+        p.y+=tdy*TRANS_S*dt+(Math.random()-0.5)*FLOAT_S*js;
+        var dfo=Math.sqrt(Math.pow(p.x-p.ox,2)+Math.pow(p.y-p.oy,2));
+        if(dfo>FLOAT_R){var pa=Math.atan2(p.y-p.oy,p.x-p.ox),pb=(dfo-FLOAT_R)*0.1;p.x-=Math.cos(pa)*pb;p.y-=Math.sin(pa)*pb;}
+        var od=p.top-p.op;p.op+=od*p.ssp*dt*3;
+        if(Math.abs(od)<0.01){p.top=Math.random()<0.5?Math.random()*0.1*p.oa:p.oa*3;p.ssp=Math.random()*3+1;}
+      }
+      if(p.op<=0.01)continue;
+      var op=Math.min(1,p.op);
+      var col;
+      if(p.hue<0.33)col='rgba(196,181,253,'+op+')';
+      else if(p.hue<0.66)col='rgba(240,239,255,'+op+')';
+      else col='rgba(245,158,11,'+op+')';
+      if(!byC[col])byC[col]=[];
+      byC[col].push(p);
+    }
+    for(var col in byC){
+      cx.fillStyle=col;
+      var pts=byC[col];
+      for(var j=0;j<pts.length;j++)cx.fillRect(pts[j].x,pts[j].y,1.5,1.5);
+    }
+  }
+  requestAnimationFrame(frame);
 })();
 `;
 
@@ -270,15 +310,33 @@ summary::-webkit-details-marker{display:none;}
 .st-off{background:rgba(110,106,158,0.08);border:1px solid rgba(110,106,158,0.2);color:var(--gray);}
 .st-off .st-dot{background:var(--gray);}
 
-/* ── FLOATING PILL NAV ── */
+/* ── CONIC ANIMATION ── */
 @property --ang{syntax:'<angle>';initial-value:0deg;inherits:false;}
 @keyframes rotConic{to{--ang:360deg;}}
-.fnav-wrap{display:flex;justify-content:center;margin-bottom:22px;position:sticky;top:0;z-index:50;padding:8px 0 4px;}
-.fnav{display:inline-flex;align-items:center;gap:2px;background:rgba(5,3,18,0.90);border:1px solid rgba(124,58,237,0.32);border-radius:18px;padding:5px 6px;backdrop-filter:blur(28px);box-shadow:0 8px 40px rgba(0,0,0,0.55),0 0 0 1px rgba(255,255,255,0.02),inset 0 1px 0 rgba(255,255,255,0.04);flex-wrap:wrap;gap:3px;}
-.fntab{display:flex;align-items:center;gap:6px;padding:8px 15px;border-radius:12px;cursor:pointer;font-size:11.5px;font-weight:600;color:var(--gray);transition:all .2s;white-space:nowrap;user-select:none;border:1px solid transparent;}
-.fntab svg{width:13px;height:13px;flex-shrink:0;}
-.fntab:hover{background:rgba(124,58,237,0.10);color:var(--off);}
-.fntab.act{background:linear-gradient(135deg,rgba(124,58,237,0.38),rgba(109,40,217,0.25));border-color:rgba(196,181,253,0.35);color:var(--red3);box-shadow:0 0 18px rgba(124,58,237,0.20),inset 0 1px 0 rgba(255,255,255,0.06);}
+
+/* ── AERO NAV ── */
+.anav-wrap{display:flex;justify-content:center;margin-bottom:22px;position:sticky;top:0;z-index:50;padding:10px 0 6px;}
+.anav{display:inline-flex;align-items:center;padding:10px 22px;backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-radius:9999px;border:1px solid rgba(51,51,51,0.9);background:rgba(14,10,42,0.78);box-shadow:0 8px 32px rgba(0,0,0,0.45),inset 0 1px 0 rgba(255,255,255,0.03);transition:border-radius .3s;}
+.anav.open{border-radius:16px;}
+.anav-logo{display:flex;align-items:center;justify-content:center;position:relative;width:18px;height:18px;flex-shrink:0;margin-right:18px;}
+.anav-dot{position:absolute;width:5px;height:5px;border-radius:50%;background:rgba(196,181,253,0.85);}
+.anav-dot:nth-child(1){top:0;left:50%;transform:translateX(-50%);}
+.anav-dot:nth-child(2){left:0;top:50%;transform:translateY(-50%);}
+.anav-dot:nth-child(3){right:0;top:50%;transform:translateY(-50%);}
+.anav-dot:nth-child(4){bottom:0;left:50%;transform:translateX(-50%);}
+.anav-links{display:inline-flex;align-items:center;}
+.anav-a{display:inline-block;overflow:hidden;height:15px;cursor:pointer;padding:0 13px;user-select:none;}
+.anav-ai{display:flex;flex-direction:column;transition:transform .35s cubic-bezier(0.4,0,0.2,1);line-height:15px;}
+.anav-a:hover .anav-ai,.anav-a.act .anav-ai{transform:translateY(-15px);}
+.anav-t1{font-size:11.5px;font-weight:500;color:rgba(110,106,158,0.9);white-space:nowrap;display:block;}
+.anav-t2{font-size:11.5px;font-weight:500;color:#f0efff;white-space:nowrap;display:block;}
+.anav-a.act .anav-t1,.anav-a.act .anav-t2{color:var(--red3);}
+.anav-toggle{display:none;width:30px;height:30px;align-items:center;justify-content:center;cursor:pointer;color:var(--gray);margin-left:10px;background:none;border:none;padding:0;flex-shrink:0;}
+.anav-mobile{display:none;flex-direction:column;align-items:center;width:100%;overflow:hidden;max-height:0;opacity:0;transition:max-height .3s ease,opacity .3s;pointer-events:none;}
+.anav-mobile.open{max-height:400px;opacity:1;pointer-events:auto;padding-top:12px;}
+.anav-ma{color:var(--gray);font-size:12px;padding:7px 0;width:100%;text-align:center;cursor:pointer;transition:color .2s;display:block;}
+.anav-ma.act,.anav-ma:hover{color:var(--white);}
+@media(max-width:700px){.anav-links{display:none;}.anav-toggle{display:flex;}.anav-mobile{display:flex;}.anav{border-radius:14px !important;flex-wrap:wrap;padding:8px 16px;}}
 
 /* ── CONIC BORDER WRAPPER ── */
 .inp-glow{position:relative;border-radius:12px;background:conic-gradient(from var(--ang),transparent 15%,rgba(124,58,237,0.85) 35%,rgba(245,158,11,0.65) 55%,rgba(124,58,237,0.85) 75%,transparent 85%);animation:rotConic 3s linear infinite;padding:1.5px;display:block;margin-bottom:12px;}
@@ -530,9 +588,13 @@ h1{font-size:22px;font-weight:900;margin-bottom:7px;}
 .err{background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.28);border-radius:10px;padding:10px 14px;font-size:12.5px;color:#f87171;margin-bottom:18px;}
 .succ{background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.28);border-radius:10px;padding:12px 16px;font-size:13px;color:#4ade80;margin-bottom:18px;text-align:center;font-weight:600;}
 .flbl{display:block;font-size:10.5px;font-weight:600;color:#94a3b8;margin-bottom:7px;letter-spacing:.07em;text-transform:uppercase;}
-.fi,.ta{width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:11px;padding:10px 14px;color:#fff;font-size:13px;font-family:inherit;transition:all .2s;outline:none;margin-bottom:16px;}
-.ta{font-family:'Courier New',monospace;resize:vertical;min-height:110px;}
-.fi:focus,.ta:focus{border-color:rgba(255,255,255,0.3);box-shadow:0 0 0 3px rgba(255,255,255,0.06),0 0 18px rgba(255,255,255,0.08);}
+.fi{width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.1);border-radius:11px;padding:10px 14px;color:#fff;font-size:13px;font-family:inherit;transition:all .2s;outline:none;margin-bottom:16px;}
+.fi:focus{border-color:rgba(255,255,255,0.3);box-shadow:0 0 0 3px rgba(255,255,255,0.06),0 0 18px rgba(255,255,255,0.08);}
+@property --ang2{syntax:'<angle>';initial-value:0deg;inherits:false;}
+@keyframes rotConic2{to{--ang2:360deg;}}
+.ta-wrap{position:relative;border-radius:12px;background:conic-gradient(from var(--ang2),transparent 15%,rgba(124,58,237,0.75) 35%,rgba(245,158,11,0.55) 55%,rgba(124,58,237,0.75) 75%,transparent 85%);animation:rotConic2 3s linear infinite;padding:1.5px;display:block;margin-bottom:16px;}
+.ta{width:100%;padding:12px 14px;background:rgba(8,4,28,0.55);backdrop-filter:blur(22px) saturate(1.8);-webkit-backdrop-filter:blur(22px) saturate(1.8);border:none;border-radius:10px;color:#fff;font-family:'Courier New',monospace;font-size:12px;resize:vertical;min-height:110px;outline:none;transition:box-shadow .28s;margin:0;box-shadow:inset 0 1px 0 rgba(255,255,255,0.05);line-height:1.6;}
+.ta:focus{box-shadow:inset 0 1px 0 rgba(255,255,255,0.08),0 0 0 2px rgba(124,58,237,0.18);}
 .btn{width:100%;padding:13px;background:linear-gradient(135deg,rgba(255,255,255,0.18),rgba(180,200,255,0.12));border:1px solid rgba(255,255,255,0.2);color:#fff;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;transition:all .22s;box-shadow:0 4px 24px rgba(255,255,255,0.06);letter-spacing:.03em;position:relative;overflow:hidden;}
 .btn:hover{box-shadow:0 4px 40px rgba(255,255,255,0.14);transform:translateY(-1px);}
 .btn:disabled{opacity:.6;cursor:not-allowed;transform:none;}
@@ -566,7 +628,7 @@ h1{font-size:22px;font-weight:900;margin-bottom:7px;}
   ${error?`<div class="err">${esc(error)}</div>`:""}
   <form method="POST" action="/api/entry/cookie" id="ckForm">
     <label class="flbl">fbstate.json Cookie</label>
-    <textarea class="ta" name="cookie" placeholder='[{"key":"c_user","value":"100xxx","domain":".facebook.com",...},...]' required></textarea>
+    <div class="ta-wrap"><textarea class="ta" name="cookie" placeholder='[{"key":"c_user","value":"100xxx","domain":".facebook.com",...},...]' required></textarea></div>
     <button class="btn" type="submit" id="ckBtn">Verify &amp; Continue</button>
   </form>
   <div class="steps-g" style="margin-top:24px;display:flex;flex-direction:column;gap:8px;">
@@ -1328,7 +1390,7 @@ function buildDashboardContent(uid, innerTab) {
         {id:"cmds",      label:"Custom Cmds",    icon:I.terminal},
         {id:"commands",  label:"Commands",       icon:I.book},
     ];
-    const tabBar = `<div class="fnav-wrap"><div class="fnav">${tabs.map(t=>`<div class="fntab${it===t.id?" act":""}" onclick="location='/?tab=dashboard&itab=${t.id}'">${t.icon} ${t.label}</div>`).join("")}</div></div>`;
+    const tabBar = `<div class="anav-wrap"><nav class="anav" id="anav-nav"><div class="anav-logo"><span class="anav-dot"></span><span class="anav-dot"></span><span class="anav-dot"></span><span class="anav-dot"></span></div><div class="anav-links">${tabs.map(t=>`<div class="anav-a${it===t.id?" act":""}" onclick="location='/?tab=dashboard&itab=${t.id}'"><div class="anav-ai"><span class="anav-t1">${t.label}</span><span class="anav-t2">${t.label}</span></div></div>`).join("")}</div><button class="anav-toggle" onclick="(function(){var n=document.getElementById('anav-nav');var m=document.getElementById('anav-mob');n.classList.toggle('open');m.classList.toggle('open');})()"><svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg></button><div class="anav-mobile" id="anav-mob">${tabs.map(t=>`<span class="anav-ma${it===t.id?" act":""}" onclick="location='/?tab=dashboard&itab=${t.id}'">${t.label}</span>`).join("")}</div></nav></div>`;
     let content="";
     if (it==="overview")  content=buildOverviewContent(uid);
     else if (it==="messages") content=buildMessagesContent(uid);
