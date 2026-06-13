@@ -140,14 +140,13 @@ const MAGIC_TEXT_JS = `
   var c=document.getElementById('magic-text');
   if(!c)return;
   var cx=c.getContext('2d');
-  var W=c.width=window.innerWidth,H=80;
+  var W=c.width=window.innerWidth,H=110;
   c.height=H;c.style.height=H+'px';
   var LABEL='WELCOME TO DUMMYL BOT';
-  var ps=[],isHov=false,last=performance.now();
-  var FLOAT_R=36,RETURN_S=3,FLOAT_S=0.5,TRANS_S=2.5,NOISE_SC=0.6,CHAOS=1.3,FADE_S=13;
+  var ps=[],isHov=false,last=performance.now(),gt=0;
 
   function sampleText(){
-    var fsize=Math.max(13,Math.min(W/LABEL.length*1.55,30));
+    var fsize=Math.max(20,Math.min(W/LABEL.length*1.6,44));
     var tmp=document.createElement('canvas');
     tmp.width=W;tmp.height=H*2;
     var tc=tmp.getContext('2d');
@@ -156,64 +155,55 @@ const MAGIC_TEXT_JS = `
     tc.fillText(LABEL,W/2,H/2);
     var d=tc.getImageData(0,0,W,H*2).data;
     ps=[];
-    var gap=4,sr=FLOAT_R;
+    var gap=3;
     for(var y=0;y<H*2;y+=gap)for(var x=0;x<W;x+=gap){
       var idx=(y*W+x)*4,a=d[idx+3];
       if(a>128){
-        var oa=a/255,ang=Math.random()*Math.PI*2,dist=Math.random()*sr;
-        ps.push({x:x+Math.cos(ang)*dist,y:y+Math.sin(ang)*dist,ox:x,oy:y,
-          oa:oa,op:oa*0.3,top:Math.random()*oa*0.5,
-          ssp:Math.random()*2+1,fa:Math.random()*Math.PI*2,fs:Math.random()*2+1,
-          hue:x/W});
+        ps.push({
+          x:x+(Math.random()-0.5)*120,
+          y:y+(Math.random()-0.5)*120,
+          ox:x,oy:y,
+          vx:0,vy:0,
+          op:0,
+          hue:x/W
+        });
       }
     }
   }
   sampleText();
   window.addEventListener('resize',function(){W=c.width=window.innerWidth;sampleText();});
-  window.addEventListener('mousemove',function(e){isHov=e.clientY<110;});
-  window.addEventListener('touchmove',function(e){if(e.touches[0])isHov=e.touches[0].clientY<110;},{passive:true});
+  window.addEventListener('mousemove',function(e){isHov=e.clientY<130;});
+  window.addEventListener('touchmove',function(e){if(e.touches[0])isHov=e.touches[0].clientY<130;},{passive:true});
   window.addEventListener('mouseleave',function(){isHov=false;});
 
   function frame(now){
     requestAnimationFrame(frame);
-    var dt=Math.min((now-last)/1000,0.05);last=now;
+    var dt=Math.min((now-last)/1000,0.05);last=now;gt+=dt;
     cx.clearRect(0,0,W,H);
-    var byC={};
     for(var i=0;i<ps.length;i++){
       var p=ps[i];
       if(isHov){
-        var dx=p.ox-p.x,dy=p.oy-p.y,dd=Math.sqrt(dx*dx+dy*dy);
-        if(dd>0.1){p.x+=dx/dd*RETURN_S*dt*60;p.y+=dy/dd*RETURN_S*dt*60;}
-        else{p.x=p.ox;p.y=p.oy;}
-        p.op=Math.max(0,p.op-FADE_S*dt);
+        var dx=p.x-p.ox,dy=p.y-p.oy;
+        p.vx+=(dx*0.05+(Math.random()-0.5)*4);
+        p.vy+=(dy*0.05+(Math.random()-0.5)*4);
+        p.vx*=0.90;p.vy*=0.90;
+        p.x+=p.vx;p.y+=p.vy;
+        p.op=Math.max(0,p.op-6*dt);
       }else{
-        var t=now*0.001;
-        p.fa+=dt*p.fs*(1+Math.random()*CHAOS);
-        var nx=(Math.sin(t*p.fs+p.fa)*1.2+Math.sin((t+p.fs*2000)*0.5)*0.8+(Math.random()-0.5)*CHAOS)*NOISE_SC;
-        var ny=(Math.cos(t*p.fs+p.fa*1.5)*0.6+Math.cos((t+p.fs*2000)*0.5)*0.4+(Math.random()-0.5)*CHAOS)*NOISE_SC;
-        var tx=p.ox+FLOAT_R*nx,ty=p.oy+FLOAT_R*ny;
-        var tdx=tx-p.x,tdy=ty-p.y,dtt=Math.sqrt(tdx*tdx+tdy*tdy);
-        var js=Math.min(1,dtt/(FLOAT_R*1.5));
-        p.x+=tdx*TRANS_S*dt+(Math.random()-0.5)*FLOAT_S*js;
-        p.y+=tdy*TRANS_S*dt+(Math.random()-0.5)*FLOAT_S*js;
-        var dfo=Math.sqrt(Math.pow(p.x-p.ox,2)+Math.pow(p.y-p.oy,2));
-        if(dfo>FLOAT_R){var pa=Math.atan2(p.y-p.oy,p.x-p.ox),pb=(dfo-FLOAT_R)*0.1;p.x-=Math.cos(pa)*pb;p.y-=Math.sin(pa)*pb;}
-        var od=p.top-p.op;p.op+=od*p.ssp*dt*3;
-        if(Math.abs(od)<0.01){p.top=Math.random()<0.5?Math.random()*0.1*p.oa:p.oa*3;p.ssp=Math.random()*3+1;}
+        p.vx+=(p.ox-p.x)*0.10;p.vy+=(p.oy-p.y)*0.10;
+        p.vx*=0.78;p.vy*=0.78;
+        p.x+=p.vx+(Math.sin(gt*1.4+i*0.04)*0.18);
+        p.y+=p.vy+(Math.cos(gt*1.1+i*0.06)*0.12);
+        var tgt=0.68+Math.sin(gt*2.8+i*0.35)*0.32;
+        p.op+=(tgt-p.op)*4*dt;
+        if(p.op>1)p.op=1;
       }
-      if(p.op<=0.01)continue;
+      if(p.op<0.02)continue;
       var op=Math.min(1,p.op);
-      var col;
-      if(p.hue<0.33)col='rgba(252,165,165,'+op+')';
-      else if(p.hue<0.66)col='rgba(240,239,255,'+op+')';
-      else col='rgba(245,158,11,'+op+')';
-      if(!byC[col])byC[col]=[];
-      byC[col].push(p);
-    }
-    for(var col in byC){
-      cx.fillStyle=col;
-      var pts=byC[col];
-      for(var j=0;j<pts.length;j++)cx.fillRect(pts[j].x,pts[j].y,1.5,1.5);
+      if(p.hue<0.33)cx.fillStyle='rgba(252,165,165,'+op+')';
+      else if(p.hue<0.66)cx.fillStyle='rgba(255,255,255,'+op+')';
+      else cx.fillStyle='rgba(245,158,11,'+op+')';
+      cx.fillRect(p.x,p.y,1.8,1.8);
     }
   }
   requestAnimationFrame(frame);
@@ -608,7 +598,7 @@ h1{font-size:22px;font-weight:900;margin-bottom:7px;}
 .ps.done{background:rgba(255,255,255,0.45);}
 .ps.act{background:linear-gradient(90deg,rgba(255,255,255,0.6),rgba(255,255,255,0.15));animation:psAnim 1.5s ease-in-out infinite;}
 @keyframes psAnim{0%,100%{opacity:.7;}50%{opacity:1;}}
-#magic-text{position:fixed;top:0;left:0;width:100%;height:80px;z-index:2;pointer-events:none;}
+#magic-text{position:fixed;top:0;left:0;width:100%;height:110px;z-index:2;pointer-events:none;}
 </style>
 </head><body>
 <canvas id="neuro"></canvas>
