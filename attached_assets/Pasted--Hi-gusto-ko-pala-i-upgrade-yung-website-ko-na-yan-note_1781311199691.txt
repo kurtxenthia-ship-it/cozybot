@@ -1,0 +1,1459 @@
+‎Hi gusto ko pala i upgrade yung website ko na yan 
+‎
+‎note: wag ka mag endpoint made pag tapos ka na mag ask ka lang ano next step wag ka mag endpoint made at mag send ka ng secret para ma send ko github token ko para rekta push mo na agad pag tapos na lahat ng task
+‎
+WEB DESIGN & CHANGES
+
+‎gusto ko pala muna baguhin bg ng site ayoko na ng galaxy background ito na lang gawin mong background 
+‎
+‎import React, { useEffect, useRef } from 'react';
+
+const InteractiveNeuralVortex = () => {
+  const canvasRef = useRef(null);
+  const pointer = useRef({ x: 0, y: 0, tX: 0, tY: 0 }); // Real-time pointer updates
+  const animationRef = useRef(null);
+
+  // WebGL setup
+  useEffect(() => {
+    const canvasEl = canvasRef.current;
+    if (!canvasEl) return;
+
+    // Initialize WebGL context
+    const gl = canvasEl.getContext('webgl') || canvasEl.getContext('experimental-webgl');
+    if (!gl) {
+      console.error('WebGL not supported');
+      return;
+    }
+
+    // Shader sources
+    const vsSource = `
+      precision mediump float;
+      attribute vec2 a_position;
+      varying vec2 vUv;
+      void main() {
+        vUv = .5 * (a_position + 1.);
+        gl_Position = vec4(a_position, 0.0, 1.0);
+      }
+    `;
+
+    const fsSource = `
+      precision mediump float;
+      varying vec2 vUv;
+      uniform float u_time;
+      uniform float u_ratio;
+      uniform vec2 u_pointer_position;
+      uniform float u_scroll_progress;
+      
+      vec2 rotate(vec2 uv, float th) {
+        return mat2(cos(th), sin(th), -sin(th), cos(th)) * uv;
+      }
+      
+      float neuro_shape(vec2 uv, float t, float p) {
+        vec2 sine_acc = vec2(0.);
+        vec2 res = vec2(0.);
+        float scale = 8.;
+        for (int j = 0; j < 15; j++) {
+          uv = rotate(uv, 1.);
+          sine_acc = rotate(sine_acc, 1.);
+          vec2 layer = uv * scale + float(j) + sine_acc - t;
+          sine_acc += sin(layer) + 2.4 * p;
+          res += (.5 + .5 * cos(layer)) / scale;
+          scale *= (1.2);
+        }
+        return res.x + res.y;
+      }
+      
+      void main() {
+        vec2 uv = .5 * vUv;
+        uv.x *= u_ratio;
+        vec2 pointer = vUv - u_pointer_position;
+        pointer.x *= u_ratio;
+        float p = clamp(length(pointer), 0., 1.);
+        p = .5 * pow(1. - p, 2.);
+        float t = .001 * u_time;
+        vec3 color = vec3(0.);
+        float noise = neuro_shape(uv, t, p);
+        noise = 1.2 * pow(noise, 3.);
+        noise += pow(noise, 10.);
+        noise = max(.0, noise - .5);
+        noise *= (1. - length(vUv - .5));
+        color = vec3(0.5, 0.15, 0.65);
+        color = mix(color, vec3(0.02, 0.7, 0.9), 0.32 + 0.16 * sin(2.0 * u_scroll_progress + 1.2));
+        color += vec3(0.15, 0.0, 0.6) * sin(2.0 * u_scroll_progress + 1.5);
+        color = color * noise;
+        gl_FragColor = vec4(color, noise);
+      }
+    `;
+
+    // Shader compilation
+    const compileShader = (gl, source, type) => {
+      const shader = gl.createShader(type);
+      gl.shaderSource(shader, source);
+      gl.compileShader(shader);
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('Shader error:', gl.getShaderInfoLog(shader));
+        gl.deleteShader(shader);
+        return null;
+      }
+      return shader;
+    };
+
+    const vertexShader = compileShader(gl, vsSource, gl.VERTEX_SHADER);
+    const fragmentShader = compileShader(gl, fsSource, gl.FRAGMENT_SHADER);
+
+    // Program setup
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.error('Program link error:', gl.getProgramInfoLog(program));
+      return;
+    }
+    gl.useProgram(program);
+
+    // Geometry
+    const vertices = new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]);
+    const vertexBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.STATIC_DRAW);
+
+    const positionLocation = gl.getAttribLocation(program, 'a_position');
+    gl.enableVertexAttribArray(positionLocation);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+    // Uniforms
+    const uTime = gl.getUniformLocation(program, 'u_time');
+    const uRatio = gl.getUniformLocation(program, 'u_ratio');
+    const uPointerPosition = gl.getUniformLocation(program, 'u_pointer_position');
+    const uScrollProgress = gl.getUniformLocation(program, 'u_scroll_progress');
+
+    // Resize handler
+    const resizeCanvas = () => {
+      const devicePixelRatio = Math.min(window.devicePixelRatio, 2);
+      canvasEl.width = window.innerWidth * devicePixelRatio;
+      canvasEl.height = window.innerHeight * devicePixelRatio;
+      gl.viewport(0, 0, canvasEl.width, canvasEl.height);
+      gl.uniform1f(uRatio, canvasEl.width / canvasEl.height);
+    };
+
+    resizeCanvas();
+    window.addEventListener('resize', resizeCanvas);
+
+    // Animation loop
+    const render = () => {
+      const currentTime = performance.now();
+      
+      // Smooth pointer movement
+      pointer.current.x += (pointer.current.tX - pointer.current.x) * 0.2;
+      pointer.current.y += (pointer.current.tY - pointer.current.y) * 0.2;
+      
+      gl.uniform1f(uTime, currentTime);
+      gl.uniform2f(uPointerPosition, 
+        pointer.current.x / window.innerWidth, 
+        1 - pointer.current.y / window.innerHeight
+      );
+      gl.uniform1f(uScrollProgress, window.pageYOffset / (2 * window.innerHeight));
+      
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      animationRef.current = requestAnimationFrame(render);
+    };
+
+    render();
+
+    // Event listeners
+    const handleMouseMove = (e) => {
+      pointer.current.tX = e.clientX;
+      pointer.current.tY = e.clientY;
+    };
+
+    window.addEventListener('pointermove', handleMouseMove);
+    window.addEventListener('touchmove', (e) => {
+      if (e.touches[0]) {
+        pointer.current.tX = e.touches[0].clientX;
+        pointer.current.tY = e.touches[0].clientY;
+      }
+    });
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('resize', resizeCanvas);
+      window.removeEventListener('pointermove', handleMouseMove);
+      cancelAnimationFrame(animationRef.current);
+      gl.deleteProgram(program);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+    };
+  }, []);
+
+  return (
+    <div className="relative min-h-screen flex flex-col items-center justify-center overflow-x-hidden font-sans">
+      {/* Canvas Background */}
+      <canvas 
+        ref={canvasRef} 
+        id="neuro" 
+        className="fixed inset-0 w-full h-full pointer-events-none opacity-95 z-0"
+      ></canvas>
+
+      {/* Hero Section */}
+      <section className="flex flex-col items-center justify-center flex-1 w-full px-6 z-10 mt-16">
+        <div className="max-w-2xl w-full outline-style rounded-3xl px-8 py-14 text-center backdrop-blur-md animate-seq">
+          <h1 className="geist-heading geist-h1">
+            Step Into the Future of VR
+          </h1>
+          <p className="geist-heading geist-h2 mb-9 text-white/60">
+            ImmersiaVR delivers breathtaking realism, seamless interaction, and endless possibilities for gaming, education, and beyond.
+          </p>
+          <a href="#get-started"
+            className="inline-block px-8 py-4 rounded-xl outline-btn font-semibold text-white">
+            Get Started
+          </a>
+        </div>
+      </section>
+
+      {/* Custom Animations */}
+      <style jsx>{`
+        @keyframes slideInLeft { 
+          from { opacity: 0; transform: translateX(-40px); } 
+          to { opacity: 1; transform: translateX(0); } 
+        }
+        @keyframes slideInRight { 
+          from { opacity: 0; transform: translateX(40px); } 
+          to { opacity: 1; transform: translateX(0); } 
+        }
+        @keyframes slideInUp { 
+          from { opacity: 0; transform: translateY(40px); } 
+          to { opacity: 1; transform: translateY(0); } 
+        }
+        .animate-seq {
+          animation: slideInUp 0.8s both;
+        }
+        .geist-heading {
+          font-family: 'Geist', ui-sans-serif, system-ui, sans-serif;
+          font-weight: 300;
+          letter-spacing: -0.02em;
+          color: #fff;
+          margin-bottom: 0.5em;
+        }
+        .geist-h1 {
+          font-size: 48px;
+          line-height: 1.05;
+        }
+        @media (min-width: 768px) {
+          .geist-h1 { font-size: 64px; }
+        }
+        .geist-h2 {
+          font-size: 20px;
+          line-height: 1.2;
+        }
+        @media (min-width: 768px) {
+          .geist-h2 { font-size: 20px; }
+        }
+        .geist-h3 {
+          font-size: 16px;
+          line-height: 1.2;
+        }
+        @media (min-width: 768px) {
+          .geist-h3 { font-size: 20px; }
+        }
+        .outline-style,
+        .outline-btn,
+        .outline-card {
+          border: 2px solid rgba(255,255,255,0.10) !important;
+          background: transparent;
+          box-shadow: none;
+        }
+        .text-white-important, .text-white, h1, h2, h3, h4, h5, h6, p, span, a, footer, nav { 
+          color: #fff !important; 
+        }
+        a { text-decoration: none !important; }
+      `}</style>
+    </div>
+  );
+};
+
+export default InteractiveNeuralVortex;
+
+yan ang background nakuha ko yan sa web ng kuhaan ng mga ui ideas and pwede ko ma copy src kaya sinend ko sayo yan gawin mong bg
+
+
+tas ito yung border na ganto ilagay mo sa mga chat inputter at at iba pang ginagamitan ng pag tataype yk what i mean ito src import React from 'react';
+
+const SearchComponent = () => {
+  return (
+    <div className="relative flex items-center justify-center">
+      <div className="absolute z-[-1] w-full h-min-screen"></div>
+      <div id="poda" className="relative flex items-center justify-center group">
+        <div className="absolute z-[-1] overflow-hidden h-full w-full max-h-[70px] max-w-[314px] rounded-xl blur-[3px] 
+                        before:absolute before:content-[''] before:z-[-2] before:w-[999px] before:h-[999px] before:bg-no-repeat before:top-1/2 before:left-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:rotate-60
+                        before:bg-[conic-gradient(#000,#402fb5_5%,#000_38%,#000_50%,#cf30aa_60%,#000_87%)] before:transition-all before:duration-2000
+                        group-hover:before:rotate-[-120deg] group-focus-within:before:rotate-[420deg] group-focus-within:before:duration-[4000ms]">
+        </div>
+        <div className="absolute z-[-1] overflow-hidden h-full w-full max-h-[65px] max-w-[312px] rounded-xl blur-[3px] 
+                        before:absolute before:content-[''] before:z-[-2] before:w-[600px] before:h-[600px] before:bg-no-repeat before:top-1/2 before:left-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:rotate-[82deg]
+                        before:bg-[conic-gradient(rgba(0,0,0,0),#18116a,rgba(0,0,0,0)_10%,rgba(0,0,0,0)_50%,#6e1b60,rgba(0,0,0,0)_60%)] before:transition-all before:duration-2000
+                        group-hover:before:rotate-[-98deg] group-focus-within:before:rotate-[442deg] group-focus-within:before:duration-[4000ms]">
+        </div>
+        <div className="absolute z-[-1] overflow-hidden h-full w-full max-h-[65px] max-w-[312px] rounded-xl blur-[3px] 
+                        before:absolute before:content-[''] before:z-[-2] before:w-[600px] before:h-[600px] before:bg-no-repeat before:top-1/2 before:left-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:rotate-[82deg]
+                        before:bg-[conic-gradient(rgba(0,0,0,0),#18116a,rgba(0,0,0,0)_10%,rgba(0,0,0,0)_50%,#6e1b60,rgba(0,0,0,0)_60%)] before:transition-all before:duration-2000
+                        group-hover:before:rotate-[-98deg] group-focus-within:before:rotate-[442deg] group-focus-within:before:duration-[4000ms]">
+        </div>
+        <div className="absolute z-[-1] overflow-hidden h-full w-full max-h-[65px] max-w-[312px] rounded-xl blur-[3px] 
+                        before:absolute before:content-[''] before:z-[-2] before:w-[600px] before:h-[600px] before:bg-no-repeat before:top-1/2 before:left-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:rotate-[82deg]
+                        before:bg-[conic-gradient(rgba(0,0,0,0),#18116a,rgba(0,0,0,0)_10%,rgba(0,0,0,0)_50%,#6e1b60,rgba(0,0,0,0)_60%)] before:transition-all before:duration-2000
+                        group-hover:before:rotate-[-98deg] group-focus-within:before:rotate-[442deg] group-focus-within:before:duration-[4000ms]">
+        </div>
+
+        <div className="absolute z-[-1] overflow-hidden h-full w-full max-h-[63px] max-w-[307px] rounded-lg blur-[2px] 
+                        before:absolute before:content-[''] before:z-[-2] before:w-[600px] before:h-[600px] before:bg-no-repeat before:top-1/2 before:left-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:rotate-[83deg]
+                        before:bg-[conic-gradient(rgba(0,0,0,0)_0%,#a099d8,rgba(0,0,0,0)_8%,rgba(0,0,0,0)_50%,#dfa2da,rgba(0,0,0,0)_58%)] before:brightness-140
+                        before:transition-all before:duration-2000 group-hover:before:rotate-[-97deg] group-focus-within:before:rotate-[443deg] group-focus-within:before:duration-[4000ms]">
+        </div>
+
+        <div className="absolute z-[-1] overflow-hidden h-full w-full max-h-[59px] max-w-[303px] rounded-xl blur-[0.5px] 
+                        before:absolute before:content-[''] before:z-[-2] before:w-[600px] before:h-[600px] before:bg-no-repeat before:top-1/2 before:left-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:rotate-70
+                        before:bg-[conic-gradient(#1c191c,#402fb5_5%,#1c191c_14%,#1c191c_50%,#cf30aa_60%,#1c191c_64%)] before:brightness-130
+                        before:transition-all before:duration-2000 group-hover:before:rotate-[-110deg] group-focus-within:before:rotate-[430deg] group-focus-within:before:duration-[4000ms]">
+        </div>
+
+        <div id="main" className="relative group">
+          <input placeholder="Search..." type="text" name="text" className="bg-[#010201] border-none w-[301px] h-[56px] rounded-lg text-white px-[59px] text-lg focus:outline-none placeholder-gray-400" />
+          <div id="input-mask" className="pointer-events-none w-[100px] h-[20px] absolute bg-gradient-to-r from-transparent to-black top-[18px] left-[70px] group-focus-within:hidden"></div>
+          <div id="pink-mask" className="pointer-events-none w-[30px] h-[20px] absolute bg-[#cf30aa] top-[10px] left-[5px] blur-2xl opacity-80 transition-all duration-2000 group-hover:opacity-0"></div>
+          <div className="absolute h-[42px] w-[40px] overflow-hidden top-[7px] right-[7px] rounded-lg
+                          before:absolute before:content-[''] before:w-[600px] before:h-[600px] before:bg-no-repeat before:top-1/2 before:left-1/2 before:-translate-x-1/2 before:-translate-y-1/2 before:rotate-90
+                          before:bg-[conic-gradient(rgba(0,0,0,0),#3d3a4f,rgba(0,0,0,0)_50%,rgba(0,0,0,0)_50%,#3d3a4f,rgba(0,0,0,0)_100%)]
+                          before:brightness-135 before:animate-spin-slow">
+          </div>
+          <div id="filter-icon" className="absolute top-2 right-2 flex items-center justify-center z-[2] max-h-10 max-w-[38px] h-full w-full [isolation:isolate] overflow-hidden rounded-lg bg-gradient-to-b from-[#161329] via-black to-[#1d1b4b] border border-transparent">
+            <svg preserveAspectRatio="none" height="27" width="27" viewBox="4.8 4.56 14.832 15.408" fill="none">
+              <path d="M8.16 6.65002H15.83C16.47 6.65002 16.99 7.17002 16.99 7.81002V9.09002C16.99 9.56002 16.7 10.14 16.41 10.43L13.91 12.64C13.56 12.93 13.33 13.51 13.33 13.98V16.48C13.33 16.83 13.1 17.29 12.81 17.47L12 17.98C11.24 18.45 10.2 17.92 10.2 16.99V13.91C10.2 13.5 9.97 12.98 9.73 12.69L7.52 10.36C7.23 10.08 7 9.55002 7 9.20002V7.87002C7 7.17002 7.52 6.65002 8.16 6.65002Z" stroke="#d6d6e6" strokeWidth="1" strokeMiterlimit="10" strokeLinecap="round" strokeLinejoin="round"></path>
+            </svg>
+          </div>
+          <div id="search-icon" className="absolute left-5 top-[15px]">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" viewBox="0 0 24 24" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" height="24" fill="none" className="feather feather-search">
+              <circle stroke="url(#search)" r="8" cy="11" cx="11"></circle>
+              <line stroke="url(#searchl)" y2="16.65" y1="22" x2="16.65" x1="22"></line>
+              <defs>
+                <linearGradient gradientTransform="rotate(50)" id="search">
+                  <stop stopColor="#f8e7f8" offset="0%"></stop>
+                  <stop stopColor="#b6a9b7" offset="50%"></stop>
+                </linearGradient>
+                <linearGradient id="searchl">
+                  <stop stopColor="#b6a9b7" offset="0%"></stop>
+                  <stop stopColor="#837484" offset="50%"></stop>
+                </linearGradient>
+              </defs>
+            </svg>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default SearchComponent;
+
+gusto kong i apply mo yung mga ganto sa photo inputter 
+
+import React, { memo, useId, forwardRef } from 'react';
+import { motion, LazyMotion, domAnimation } from 'framer-motion';
+
+const ICON_VARIANTS = {
+  left: {
+    initial: { scale: 0.8, opacity: 0, x: 0, y: 0, rotate: 0 },
+    animate: { scale: 1, opacity: 1, x: 0, y: 0, rotate: -6, transition: { duration: 0.4, delay: 0.1 } },
+    hover: { x: -22, y: -5, rotate: -15, scale: 1.1, transition: { duration: 0.2 } }
+  },
+  center: {
+    initial: { scale: 0.8, opacity: 0 },
+    animate: { scale: 1, opacity: 1, transition: { duration: 0.4, delay: 0.2 } },
+    hover: { y: -10, scale: 1.15, transition: { duration: 0.2 } }
+  },
+  right: {
+    initial: { scale: 0.8, opacity: 0, x: 0, y: 0, rotate: 0 },
+    animate: { scale: 1, opacity: 1, x: 0, y: 0, rotate: 6, transition: { duration: 0.4, delay: 0.3 } },
+    hover: { x: 22, y: -5, rotate: 15, scale: 1.1, transition: { duration: 0.2 } }
+  }
+};
+
+const CONTENT_VARIANTS = {
+  initial: { y: 20, opacity: 0 },
+  animate: { y: 0, opacity: 1, transition: { duration: 0.4, delay: 0.2 } },
+};
+
+const BUTTON_VARIANTS = {
+  initial: { y: 20, opacity: 0 },
+  animate: { y: 0, opacity: 1, transition: { duration: 0.4, delay: 0.3 } },
+};
+
+export const cn = (...classes) => classes.filter(Boolean).join(' ');
+
+const IconContainer = memo(({ children, variant, className = '', theme }) => (
+  <motion.div
+    variants={ICON_VARIANTS[variant]}
+    className={cn(
+      "w-12 h-12 rounded-xl flex items-center justify-center relative shadow-lg transition-all duration-300",
+      theme === 'dark' && "bg-neutral-800 border border-neutral-700 group-hover:shadow-xl group-hover:border-neutral-600",
+      theme === 'neutral' && "bg-stone-100 border border-stone-200 group-hover:shadow-xl group-hover:border-stone-300",
+      (!theme || theme === 'light') && "bg-white border border-gray-200 group-hover:shadow-xl group-hover:border-gray-300",
+      className
+    )}
+  >
+    <div className={cn(
+      "text-sm transition-colors duration-300",
+      theme === 'dark' && "text-neutral-400 group-hover:text-neutral-200",
+      theme === 'neutral' && "text-stone-500 group-hover:text-stone-700",
+      (!theme || theme === 'light') && "text-gray-500 group-hover:text-gray-700"
+    )}>
+      {children}
+    </div>
+  </motion.div>
+));
+IconContainer.displayName = "IconContainer";
+
+const MultiIconDisplay = memo(({ icons, theme }) => {
+  if (!icons || icons.length < 3) return null;
+
+  return (
+    <div className="flex justify-center isolate relative">
+      <IconContainer variant="left" className="left-2 top-1 z-10" theme={theme}>
+        {icons[0]}
+      </IconContainer>
+      <IconContainer variant="center" className="z-20" theme={theme}>
+        {icons[1]}
+      </IconContainer>
+      <IconContainer variant="right" className="right-2 top-1 z-10" theme={theme}>
+        {icons[2]}
+      </IconContainer>
+    </div>
+  );
+});
+MultiIconDisplay.displayName = "MultiIconDisplay";
+
+const Background = ({ theme }) => (
+  <div
+    aria-hidden="true"
+    className="absolute inset-0 opacity-0 group-hover:opacity-[0.02] transition-opacity duration-500"
+    style={{
+      backgroundImage: `radial-gradient(circle at 2px 2px, #fff 1px, transparent 1px)`,
+      backgroundSize: '24px 24px'
+    }}
+  />
+);
+
+export const EmptyState = forwardRef(({
+  title,
+  description,
+  icons,
+  action,
+  variant = 'default',
+  size = 'default',
+  theme = 'light',
+  isIconAnimated = true,
+  className = '',
+  ...props
+}, ref) => {
+  const titleId = useId();
+  const descriptionId = useId();
+
+  const baseClasses = "group transition-all duration-300 rounded-xl relative overflow-hidden text-center flex flex-col items-center justify-center";
+
+  const sizeClasses = {
+    sm: "p-6",
+    default: "p-8",
+    lg: "p-12"
+  };
+
+  const getVariantClasses = (variant, theme) => {
+    const variants = {
+      default: {
+        light: "bg-white border-dashed border-2 border-gray-300 hover:border-gray-400 hover:bg-gray-50/50",
+        dark: "bg-neutral-900 border-dashed border-2 border-neutral-700 hover:border-neutral-600 hover:bg-neutral-800/50",
+        neutral: "bg-stone-50 border-dashed border-2 border-stone-300 hover:border-stone-400 hover:bg-stone-100/50"
+      },
+      subtle: {
+        light: "bg-white border border-transparent hover:bg-gray-50/30",
+        dark: "bg-neutral-900 border border-transparent hover:bg-neutral-800/30",
+        neutral: "bg-stone-50 border border-transparent hover:bg-stone-100/30"
+      },
+      error: {
+        light: "bg-white border border-red-200 bg-red-50/50 hover:bg-red-50/80",
+        dark: "bg-neutral-900 border border-red-800 bg-red-950/50 hover:bg-red-950/80",
+        neutral: "bg-stone-50 border border-red-300 bg-red-50/50 hover:bg-red-50/80"
+      }
+    };
+    return variants[variant][theme];
+  };
+
+  const getTextClasses = (type, size, theme) => {
+    const sizes = {
+      title: {
+        sm: "text-base",
+        default: "text-lg",
+        lg: "text-xl"
+      },
+      description: {
+        sm: "text-xs",
+        default: "text-sm",
+        lg: "text-base"
+      }
+    };
+
+    const colors = {
+      title: {
+        light: "text-gray-900",
+        dark: "text-neutral-100",
+        neutral: "text-stone-900"
+      },
+      description: {
+        light: "text-gray-600",
+        dark: "text-neutral-400",
+        neutral: "text-stone-600"
+      }
+    };
+
+    return cn(sizes[type][size], colors[type][theme], "font-semibold transition-colors duration-200");
+  };
+
+  const getButtonClasses = (size, theme) => {
+    const sizeClasses = {
+      sm: "text-xs px-3 py-1.5",
+      default: "text-sm px-4 py-2",
+      lg: "text-base px-6 py-3"
+    };
+
+    const themeClasses = {
+      light: "border-gray-300 bg-white hover:bg-gray-50 text-gray-700",
+      dark: "border-neutral-600 bg-neutral-800 hover:bg-neutral-700 text-neutral-200",
+      neutral: "border-stone-300 bg-stone-100 hover:bg-stone-200 text-stone-700"
+    };
+
+    return cn(
+      "inline-flex items-center gap-2 border rounded-md font-medium shadow-sm hover:shadow-md transition-all duration-200 relative overflow-hidden group/button disabled:opacity-50 disabled:cursor-not-allowed",
+      sizeClasses[size],
+      themeClasses[theme]
+    );
+  };
+
+  return (
+    <LazyMotion features={domAnimation}>
+      <motion.section
+        ref={ref}
+        role="region"
+        aria-labelledby={titleId}
+        aria-describedby={descriptionId}
+        className={cn(
+          baseClasses,
+          sizeClasses[size],
+          getVariantClasses(variant, theme),
+          className
+        )}
+        initial="initial"
+        animate="animate"
+        whileHover={isIconAnimated ? "hover" : "animate"}
+        {...props}
+      >
+        <Background theme={theme} />
+        <div className="relative z-10 flex flex-col items-center">
+          {icons && (
+            <div className="mb-6">
+              <MultiIconDisplay icons={icons} theme={theme} />
+            </div>
+          )}
+
+          <motion.div variants={CONTENT_VARIANTS} className="space-y-2 mb-6">
+            <h2 id={titleId} className={getTextClasses('title', size, theme)}>
+              {title}
+            </h2>
+            {description && (
+              <p
+                id={descriptionId}
+                className={cn(
+                  getTextClasses('description', size, theme).replace('font-semibold', ''),
+                  "max-w-md leading-relaxed"
+                )}
+              >
+                {description}
+              </p>
+            )}
+          </motion.div>
+
+          {action && (
+            <motion.div variants={BUTTON_VARIANTS}>
+              <motion.button
+                type="button"
+                onClick={action.onClick}
+                disabled={action.disabled}
+                className={getButtonClasses(size, theme)}
+                whileTap={{ scale: 0.98 }}
+              >
+                {action.icon && (
+                  <motion.div
+                    className="transition-transform group-hover/button:rotate-90"
+                    whileHover={{ rotate: 90 }}
+                  >
+                    {action.icon}
+                  </motion.div>
+                )}
+                <span className="relative z-10">{action.label}</span>
+              </motion.button>
+            </motion.div>
+          )}
+        </div>
+      </motion.section>
+    </LazyMotion>
+  );
+});
+EmptyState.displayName = "EmptyState";
+
+
+ito gawin mo sa mga confirm button nd any button "use client";
+import { Button } from "@/components/ui/button";
+import { Moon } from "@aliimam/icons";
+import { cn } from "@/lib/utils";
+import { motion } from "motion/react";
+
+export function ButtonDemo() {
+  return (
+    <div className="flex gap-3">
+      <Button variant={"outline"} className="relative">
+        <div
+          className={cn(
+            "-inset-px pointer-events-none absolute rounded-[inherit] border-2 border-transparent border-inset [mask-clip:padding-box,border-box]",
+            "[mask-composite:intersect] [mask-image:linear-gradient(transparent,transparent),linear-gradient(#000,#000)]"
+          )}
+        >
+          <motion.div
+            className={cn(
+              "absolute aspect-square bg-gradient-to-r from-transparent via-primary to-primary"
+            )}
+            animate={{
+              offsetDistance: ["0%", "100%"],
+            }}
+            style={{
+              width: 20,
+              offsetPath: `rect(0 auto auto 0 round ${20}px)`,
+            }}
+            transition={{
+              repeat: Number.POSITIVE_INFINITY,
+              duration: 5,
+              ease: "linear",
+            }}
+          />
+        </div>
+        <Moon />
+      </Button>
+
+      <Button variant={"outline"} className="relative">
+        <div
+          className={cn(
+            "-inset-px pointer-events-none absolute rounded-[inherit] border-2 border-transparent border-inset [mask-clip:padding-box,border-box]",
+            "[mask-composite:intersect] [mask-image:linear-gradient(transparent,transparent),linear-gradient(#000,#000)]"
+          )}
+        >
+          <motion.div
+            className={cn(
+              "absolute aspect-square bg-gradient-to-r from-transparent via-primary to-primary"
+            )}
+            animate={{
+              offsetDistance: ["0%", "100%"],
+            }}
+            style={{
+              width: 20,
+              offsetPath: `rect(0 auto auto 0 round ${20}px)`,
+            }}
+            transition={{
+              repeat: Number.POSITIVE_INFINITY,
+              duration: 5,
+              ease: "linear",
+            }}
+          />
+        </div>
+        Animated Border
+      </Button>
+    </div>
+  );
+}
+
+ito ilagay mo rito sa magic text is WELCOME TO DUMMYL BOT'use client'
+import React, { useRef, useState, useEffect, useCallback, useMemo } from 'react';
+
+interface Particle {
+  x: number;
+  y: number;
+  originalX: number;
+  originalY: number;
+  color: string;
+  opacity: number;
+  originalAlpha: number;
+  velocityX: number;
+  velocityY: number;
+  angle: number;
+  speed: number;
+  floatingOffsetX: number;
+  floatingOffsetY: number;
+  floatingSpeed: number;
+  floatingAngle: number;
+  targetOpacity: number;
+  sparkleSpeed: number;
+}
+
+interface MagicTextRevealProps {
+  text?: string;
+  color?: string;
+  fontSize?: number;
+  fontFamily?: string;
+  fontWeight?: number;
+  spread?: number;
+  speed?: number;
+  density?: number;
+  resetOnMouseLeave?: boolean;
+  className?: string;
+  style?: React.CSSProperties;
+}
+
+export const MagicTextReveal: React.FC<MagicTextRevealProps> = ({
+  text = "Magic Text",
+  color = "rgba(255, 255, 255, 1)",
+  fontSize = 70,
+  fontFamily = "Jakarta Sans, sans-serif",
+  fontWeight = 600,
+  spread = 40,
+  speed = 0.5,
+  density = 4,
+  resetOnMouseLeave = true,
+  className = "",
+  style = {}
+}) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const particlesRef = useRef<Particle[]>([]);
+  const animationFrameRef = useRef<number | null>(null);
+  const lastTimeRef = useRef<number>(performance.now());
+    const [isHovered, setIsHovered] = useState(false);
+  const [showText, setShowText] = useState(false);
+  const [hasBeenShown, setHasBeenShown] = useState(false);
+  const [wrapperSize, setWrapperSize] = useState({ width: 0, height: 0 });
+  const [textDimensions, setTextDimensions] = useState({ width: 0, height: 0 });
+
+  const transformedDensity = 6 - density;
+  const globalDpr = useMemo(() => {
+    if (typeof window !== "undefined") return window.devicePixelRatio * 1.5 || 1;
+    return 1;
+  }, []);
+
+  // Measure text dimensions
+  const measureText = useCallback((text: string, fontSize: number, fontWeight: number, fontFamily: string) => {
+    if (typeof window === "undefined") return { width: 200, height: 60 };
+    
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return { width: 200, height: 60 };
+    
+    ctx.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+    const metrics = ctx.measureText(text);
+    
+    return {
+      width: Math.ceil(metrics.width + fontSize * 0.5), // Add padding
+      height: Math.ceil(fontSize * 1.4) // Line height approximation
+    };
+  }, []);
+
+  // Update text dimensions when text or font properties change
+  useEffect(() => {
+    const dimensions = measureText(text, fontSize, fontWeight, fontFamily);
+    setTextDimensions(dimensions);
+  }, [text, fontSize, fontWeight, fontFamily, measureText]);
+
+  // Create particles from text
+  const createParticles = useCallback((
+    ctx: CanvasRenderingContext2D,
+    canvas: HTMLCanvasElement,
+    text: string,
+    textX: number,
+    textY: number,
+    font: string,
+    color: string,
+    transformedDensity: number
+  ): Particle[] => {
+    const particles: Particle[] = [];
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Set text properties
+    ctx.fillStyle = color;
+    ctx.font = font;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.imageSmoothingEnabled = true;
+    
+    // Render text for sampling
+    ctx.fillText(text, textX, textY);
+    
+    // Sample the rendered text
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    
+    // Calculate sampling rate based on DPR
+    const currentDPR = canvas.width / parseInt(canvas.style.width);
+    const baseSampleRate = Math.max(2, Math.round(currentDPR));
+    const sampleRate = baseSampleRate * transformedDensity;
+    
+    // Calculate text bounds
+    let minX = canvas.width;
+    let maxX = 0;
+    let minY = canvas.height;
+    let maxY = 0;
+    
+    // First pass: find text bounds
+    for (let y = 0; y < canvas.height; y += sampleRate) {
+      for (let x = 0; x < canvas.width; x += sampleRate) {
+        const index = (y * canvas.width + x) * 4;
+        const alpha = data[index + 3];
+        if (alpha > 0) {
+          minX = Math.min(minX, x);
+          maxX = Math.max(maxX, x);
+          minY = Math.min(minY, y);
+          maxY = Math.max(maxY, y);
+        }
+      }
+    }
+    
+    // Calculate spread area
+    const textWidth = maxX - minX;
+    const textHeight = maxY - minY;
+    const spreadRadius = Math.max(textWidth, textHeight) * 0.1;
+    
+    // Second pass: create particles with random initial positions
+    for (let y = 0; y < canvas.height; y += sampleRate) {
+      for (let x = 0; x < canvas.width; x += sampleRate) {
+        const index = (y * canvas.width + x) * 4;
+        const alpha = data[index + 3];
+        if (alpha > 0) {
+          const originalAlpha = alpha / 255;
+          
+          // Calculate random initial position within spread radius
+          const angle = Math.random() * Math.PI * 2;
+          const distance = Math.random() * spreadRadius;
+          const initialX = x + Math.cos(angle) * distance;
+          const initialY = y + Math.sin(angle) * distance;
+          
+          const particle: Particle = {
+            x: initialX,
+            y: initialY,
+            originalX: x,
+            originalY: y,
+            color: `rgba(${data[index]}, ${data[index + 1]}, ${data[index + 2]}, ${originalAlpha})`,
+            opacity: originalAlpha * 0.3,
+            originalAlpha,
+            velocityX: 0,
+            velocityY: 0,
+            angle: Math.random() * Math.PI * 2,
+            speed: 0,
+            floatingOffsetX: 0,
+            floatingOffsetY: 0,
+            floatingSpeed: Math.random() * 2 + 1,
+            floatingAngle: Math.random() * Math.PI * 2,
+            targetOpacity: Math.random() * originalAlpha * 0.5,
+            sparkleSpeed: Math.random() * 2 + 1
+          };
+          particles.push(particle);
+        }
+      }
+    }
+    
+    // Clear canvas after sampling
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    return particles;
+  }, []);
+
+  // Update particles animation
+  const updateParticles = useCallback((
+    particles: Particle[],
+    deltaTime: number,
+    isHovered: boolean,
+    showText: boolean,
+    setShowText: (show: boolean) => void,
+    spread: number,
+    speed: number
+  ) => {    const FLOAT_RADIUS = spread;
+    const RETURN_SPEED = 3;
+    const FLOAT_SPEED = speed;
+    const TRANSITION_SPEED = 5 * FLOAT_SPEED;
+    const NOISE_SCALE = 0.6;
+    const CHAOS_FACTOR = 1.3;
+    const FADE_SPEED = 13; 
+
+    particles.forEach(particle => {
+      if (isHovered) {
+        // When hovered, gradually return to original position
+        const dx = particle.originalX - particle.x;
+        const dy = particle.originalY - particle.y;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance > 0.1) {
+          particle.x += (dx / distance) * RETURN_SPEED * deltaTime * 60;
+          particle.y += (dy / distance) * RETURN_SPEED * deltaTime * 60;
+        } else {
+          particle.x = particle.originalX;
+          particle.y = particle.originalY;
+        }
+        
+        // Fade out particles when hovered
+        particle.opacity = Math.max(0, particle.opacity - FADE_SPEED * deltaTime);
+      } else {
+        // Update particle's unique movement pattern
+        particle.floatingAngle += deltaTime * particle.floatingSpeed * (1 + Math.random() * CHAOS_FACTOR);
+        
+        // Generate base movement using improved noise
+        const time = Date.now() * 0.001;
+        const uniqueOffset = particle.floatingSpeed * 2000;
+        const noiseX = (
+          Math.sin(time * particle.floatingSpeed + particle.floatingAngle) * 1.2 +
+          Math.sin((time + uniqueOffset) * 0.5) * 0.8 +
+          (Math.random() - 0.5) * CHAOS_FACTOR
+        ) * NOISE_SCALE;
+        const noiseY = (
+          Math.cos(time * particle.floatingSpeed + particle.floatingAngle * 1.5) * 0.6 +
+          Math.cos((time + uniqueOffset) * 0.5) * 0.4 +
+          (Math.random() - 0.5) * CHAOS_FACTOR
+        ) * NOISE_SCALE;
+        
+        // Calculate target position with random offset
+        const randomOffsetX = FLOAT_RADIUS * noiseX;
+        const randomOffsetY = FLOAT_RADIUS * noiseY;
+        const targetX = particle.originalX + randomOffsetX;
+        const targetY = particle.originalY + randomOffsetY;
+        
+        // Smooth movement towards target with variable speed
+        const dx = targetX - particle.x;
+        const dy = targetY - particle.y;
+        
+        // Add dynamic jitter based on distance
+        const distanceFromTarget = Math.sqrt(dx * dx + dy * dy);
+        const jitterScale = Math.min(1, distanceFromTarget / (FLOAT_RADIUS * 1.5));
+        const jitterX = (Math.random() - 0.5) * FLOAT_SPEED * jitterScale;
+        const jitterY = (Math.random() - 0.5) * FLOAT_SPEED * jitterScale;
+        
+        particle.x += dx * TRANSITION_SPEED * deltaTime + jitterX;
+        particle.y += dy * TRANSITION_SPEED * deltaTime + jitterY;
+        
+        // Contain particles within bounds with soft boundary
+        const distanceFromOrigin = Math.sqrt(
+          Math.pow(particle.x - particle.originalX, 2) + 
+          Math.pow(particle.y - particle.originalY, 2)
+        );
+        if (distanceFromOrigin > FLOAT_RADIUS) {
+          const angle = Math.atan2(particle.y - particle.originalY, particle.x - particle.originalX);
+          const pullBack = (distanceFromOrigin - FLOAT_RADIUS) * 0.1;
+          particle.x -= Math.cos(angle) * pullBack;
+          particle.y -= Math.sin(angle) * pullBack;
+        }
+        
+        // Enhanced continuous sparkling effect
+        const opacityDiff = particle.targetOpacity - particle.opacity;
+        particle.opacity += opacityDiff * particle.sparkleSpeed * deltaTime * 3;
+        
+        // When particle reaches its target opacity, set a new random target
+        if (Math.abs(opacityDiff) < 0.01) {
+          particle.targetOpacity = Math.random() < 0.5 
+            ? Math.random() * 0.1 * particle.originalAlpha
+            : particle.originalAlpha * 3;
+          particle.sparkleSpeed = Math.random() * 3 + 1;
+        }
+      }
+    });
+
+    if (isHovered && !showText) {
+      setShowText(true);
+    }
+    if (!isHovered && showText) {
+      setShowText(false);
+    }
+  }, []);
+
+  // Render particles
+  const renderParticles = useCallback((
+    ctx: CanvasRenderingContext2D,
+    particles: Particle[],
+    globalDpr: number
+  ) => {
+    ctx.save();
+    ctx.scale(globalDpr, globalDpr);
+    
+    // Batch similar colored particles together
+    const particlesByColor = new Map<string, Array<{x: number, y: number}>>();
+    
+    particles.forEach(particle => {
+      if (particle.opacity <= 0) return;
+      const color = particle.color.replace(/[\d.]+\)$/, `${particle.opacity})`);
+      if (!particlesByColor.has(color)) {
+        particlesByColor.set(color, []);
+      }
+      particlesByColor.get(color)!.push({
+        x: particle.x / globalDpr,
+        y: particle.y / globalDpr
+      });
+    });
+    
+    // Render particles in batches by color
+    particlesByColor.forEach((positions, color) => {
+      ctx.fillStyle = color;
+      positions.forEach(({ x, y }) => {
+        ctx.fillRect(x, y, 1, 1);
+      });
+    });
+    
+    ctx.restore();
+  }, []);
+
+  // Render canvas
+  const renderCanvas = useCallback(() => {
+    if (!wrapperRef.current || !canvasRef.current || !wrapperSize.width || !wrapperSize.height) return;
+    
+    const canvas = canvasRef.current;
+    const { width, height } = wrapperSize;
+    
+    canvas.width = width * globalDpr;
+    canvas.height = height * globalDpr;
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
+    
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    
+    // Calculate text position
+    const textX = canvas.width / 2;
+    const textY = canvas.height / 2;
+    
+    // Create font string
+    const font = `${fontWeight} ${fontSize * globalDpr}px ${fontFamily}`;
+    
+    // Create particles from text
+    const particles = createParticles(ctx, canvas, text, textX, textY, font, color, transformedDensity);
+    
+    // Store particles for later use
+    particlesRef.current = particles;
+    
+    // Render particles
+    renderParticles(ctx, particles, globalDpr);
+  }, [wrapperSize, globalDpr, text, fontSize, fontFamily, fontWeight, color, transformedDensity, createParticles, renderParticles]);
+
+  // Animation loop
+  useEffect(() => {
+    const animate = (currentTime: number) => {
+      const deltaTime = (currentTime - lastTimeRef.current) / 1000;
+      lastTimeRef.current = currentTime;
+      
+      const canvas = canvasRef.current;
+      const ctx = canvas?.getContext("2d");
+      
+      if (!canvas || !ctx || !particlesRef.current.length) {
+        animationFrameRef.current = requestAnimationFrame(animate);
+        return;
+      }
+      
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      
+      updateParticles(
+        particlesRef.current,
+        deltaTime,
+        isHovered,
+        showText,
+        setShowText,
+        spread,
+        speed
+      );
+      
+      renderParticles(ctx, particlesRef.current, globalDpr);
+      
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+    
+    animationFrameRef.current = requestAnimationFrame(animate);
+    
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [isHovered, showText, spread, speed, globalDpr, updateParticles, renderParticles]);  // Handle resize
+  useEffect(() => {
+    const handleResize = () => {
+      if (wrapperRef.current && textDimensions.width && textDimensions.height) {
+        // Responsive padding based on screen size and font size
+        const isMobile = window.innerWidth < 768;
+        const basePadding = isMobile ? Math.max(fontSize * 0.3, 20) : Math.max(fontSize * 0.5, 40);
+        
+        const minWidth = Math.max(textDimensions.width + basePadding * 2, isMobile ? 120 : 200);
+        const minHeight = Math.max(textDimensions.height + basePadding * 2, isMobile ? 60 : 100);
+        
+        // Get container constraints with responsive maxWidth
+        const parentRect = wrapperRef.current.parentElement?.getBoundingClientRect();
+        const viewportMargin = isMobile ? 0.95 : 0.9;
+        const maxWidth = parentRect ? parentRect.width * viewportMargin : window.innerWidth * viewportMargin;
+        const maxHeight = parentRect ? parentRect.height * viewportMargin : window.innerHeight * viewportMargin;
+        
+        const finalWidth = Math.min(minWidth, maxWidth);
+        const finalHeight = Math.min(minHeight, maxHeight);
+        
+        setWrapperSize({ width: finalWidth, height: finalHeight });
+      }
+    };
+
+    // Initial resize
+    if (textDimensions.width && textDimensions.height) {
+      handleResize();
+    }
+    
+    window.addEventListener('resize', handleResize);
+    
+    return () => window.removeEventListener('resize', handleResize);
+  }, [textDimensions, fontSize]);
+
+  // Render canvas when size changes
+  useEffect(() => {
+    renderCanvas();
+  }, [renderCanvas]);
+
+  // Event handlers
+  const handleMouseEnter = useCallback(() => {
+    setIsHovered(true);
+    setHasBeenShown(true);
+  }, []);
+
+  const handleMouseLeave = useCallback(() => {
+    if (resetOnMouseLeave || !hasBeenShown) {
+      setIsHovered(false);
+    }
+  }, [resetOnMouseLeave, hasBeenShown]);
+  return (
+    <div
+      ref={wrapperRef}
+      className={`relative flex items-center justify-center overflow-hidden rounded-lg transition-all duration-300 ${className}`}
+      style={{
+        width: wrapperSize.width || 'auto',
+        height: wrapperSize.height || 'auto',
+        minWidth: '150px',
+        minHeight: '80px',
+        maxWidth: '100%',
+        backgroundColor: 'rgba(15, 15, 15, 0.8)',
+        border: '1px solid rgba(255, 255, 255, 0.1)',
+        backdropFilter: 'blur(10px)',
+        cursor: 'pointer',
+        ...style
+      }}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
+    >{/* Animated text that appears on hover */}
+      <div
+        className={`absolute z-10 transition-opacity duration-200 ${
+          showText ? 'opacity-100' : 'opacity-0'
+        }`}
+        style={{
+          color,
+          fontFamily,
+          fontWeight,
+          fontSize: `${fontSize}px`,
+          userSelect: 'none',
+          whiteSpace: 'nowrap',
+          left: '50%',
+          top: '50%',
+          transform: 'translate(-50%, -50%)',
+          textAlign: 'center'
+        }}
+      >
+        {text}
+      </div>
+      
+      {/* Canvas for particle system */}
+      <canvas
+        ref={canvasRef}
+        className="absolute top-0 left-0 w-full h-full"
+      />
+    </div>
+  );
+};
+
+tas sa baba na non yung cookie inputter gawin mo siyang glass liquid yung cookie inputter
+
+
+tas yung slider alisin na natin navigation na lang i palit natin so ito yung navigation design ito src"use client";
+
+import React, { useState, useEffect, useRef } from 'react';
+
+const AnimatedNavLink = ({ href, children }: { href: string; children: React.ReactNode }) => {
+  const defaultTextColor = 'text-gray-300';
+  const hoverTextColor = 'text-white';
+  const textSizeClass = 'text-sm';
+
+  return (
+    <a href={href} className={`group relative inline-block overflow-hidden h-5 flex items-center ${textSizeClass}`}>
+      <div className="flex flex-col transition-transform duration-400 ease-out transform group-hover:-translate-y-1/2">
+        <span className={defaultTextColor}>{children}</span>
+        <span className={hoverTextColor}>{children}</span>
+      </div>
+    </a>
+  );
+};
+
+export function Navbar() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [headerShapeClass, setHeaderShapeClass] = useState('rounded-full');
+  const shapeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const toggleMenu = () => {
+    setIsOpen(!isOpen);
+  };
+
+  useEffect(() => {
+    if (shapeTimeoutRef.current) {
+      clearTimeout(shapeTimeoutRef.current);
+    }
+
+    if (isOpen) {
+      setHeaderShapeClass('rounded-xl');
+    } else {
+      shapeTimeoutRef.current = setTimeout(() => {
+        setHeaderShapeClass('rounded-full');
+      }, 300);
+    }
+
+    return () => {
+      if (shapeTimeoutRef.current) {
+        clearTimeout(shapeTimeoutRef.current);
+      }
+    };
+  }, [isOpen]);
+
+  const logoElement = (
+    <div className="relative w-5 h-5 flex items-center justify-center">
+    <span className="absolute w-1.5 h-1.5 rounded-full bg-gray-200 top-0 left-1/2 transform -translate-x-1/2 opacity-80"></span>
+    <span className="absolute w-1.5 h-1.5 rounded-full bg-gray-200 left-0 top-1/2 transform -translate-y-1/2 opacity-80"></span>
+    <span className="absolute w-1.5 h-1.5 rounded-full bg-gray-200 right-0 top-1/2 transform -translate-y-1/2 opacity-80"></span>
+    <span className="absolute w-1.5 h-1.5 rounded-full bg-gray-200 bottom-0 left-1/2 transform -translate-x-1/2 opacity-80"></span>
+ </div>
+  );
+
+  const navLinksData = [
+    { label: 'Manifesto', href: '#1' },
+    { label: 'Careers', href: '#2' },
+    { label: 'Discover', href: '#3' },
+  ];
+
+  const loginButtonElement = (
+    <button className="px-4 py-2 sm:px-3 text-xs sm:text-sm border border-[#333] bg-[rgba(31,31,31,0.62)] text-gray-300 rounded-full hover:border-white/50 hover:text-white transition-colors duration-200 w-full sm:w-auto">
+      LogIn
+    </button>
+  );
+
+  const signupButtonElement = (
+    <div className="relative group w-full sm:w-auto">
+       <div className="absolute inset-0 -m-2 rounded-full
+                     hidden sm:block
+                     bg-gray-100
+                     opacity-40 filter blur-lg pointer-events-none
+                     transition-all duration-300 ease-out
+                     group-hover:opacity-60 group-hover:blur-xl group-hover:-m-3"></div>
+       <button className="relative z-10 px-4 py-2 sm:px-3 text-xs sm:text-sm font-semibold text-black bg-gradient-to-br from-gray-100 to-gray-300 rounded-full hover:from-gray-200 hover:to-gray-400 transition-all duration-200 w-full sm:w-auto">
+         Signup
+       </button>
+    </div>
+  );
+
+  return (
+    <header className={`fixed top-6 left-1/2 transform -translate-x-1/2 z-20
+                       flex flex-col items-center
+                       pl-6 pr-6 py-3 backdrop-blur-sm
+                       ${headerShapeClass}
+                       border border-[#333] bg-[#1f1f1f57]
+                       w-[calc(100%-2rem)] sm:w-auto
+                       transition-[border-radius] duration-0 ease-in-out`}>
+
+      <div className="flex items-center justify-between w-full gap-x-6 sm:gap-x-8">
+        <div className="flex items-center">
+           {logoElement}
+        </div>
+
+        <nav className="hidden sm:flex items-center space-x-4 sm:space-x-6 text-sm">
+          {navLinksData.map((link) => (
+            <AnimatedNavLink key={link.href} href={link.href}>
+              {link.label}
+            </AnimatedNavLink>
+          ))}
+        </nav>
+
+        <div className="hidden sm:flex items-center gap-2 sm:gap-3">
+          {loginButtonElement}
+          {signupButtonElement}
+        </div>
+
+        <button className="sm:hidden flex items-center justify-center w-8 h-8 text-gray-300 focus:outline-none" onClick={toggleMenu} aria-label={isOpen ? 'Close Menu' : 'Open Menu'}>
+          {isOpen ? (
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          ) : (
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+          )}
+        </button>
+      </div>
+
+      <div className={`sm:hidden flex flex-col items-center w-full transition-all ease-in-out duration-300 overflow-hidden
+                       ${isOpen ? 'max-h-[1000px] opacity-100 pt-4' : 'max-h-0 opacity-0 pt-0 pointer-events-none'}`}>
+        <nav className="flex flex-col items-center space-y-4 text-base w-full">
+          {navLinksData.map((link) => (
+            <a key={link.href} href={link.href} className="text-gray-300 hover:text-white transition-colors w-full text-center">
+              {link.label}
+            </a>
+          ))}
+        </nav>
+        <div className="flex flex-col items-center space-y-4 mt-4 w-full">
+          {loginButtonElement}
+          {signupButtonElement}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+
+import React, { useState, useEffect, useRef } from 'react';
+
+const AnimatedNavLink = ({ href, children }: { href: string; children: React.ReactNode }) => {
+  const defaultTextColor = 'text-gray-300';
+  const hoverTextColor = 'text-white';
+  const textSizeClass = 'text-sm';
+
+  return (
+    <a href={href} className={`group relative inline-block overflow-hidden h-5 flex items-center ${textSizeClass}`}>
+      <div className="flex flex-col transition-transform duration-400 ease-out transform group-hover:-translate-y-1/2">
+        <span className={defaultTextColor}>{children}</span>
+        <span className={hoverTextColor}>{children}</span>
+      </div>
+    </a>
+  );
+};
+
+export function Navbar() {
+  const [isOpen, setIsOpen] = useState(false);
+  const [headerShapeClass, setHeaderShapeClass] = useState('rounded-full');
+  const shapeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const toggleMenu = () => {
+    setIsOpen(!isOpen);
+  };
+
+  useEffect(() => {
+    if (shapeTimeoutRef.current) {
+      clearTimeout(shapeTimeoutRef.current);
+    }
+
+    if (isOpen) {
+      setHeaderShapeClass('rounded-xl');
+    } else {
+      shapeTimeoutRef.current = setTimeout(() => {
+        setHeaderShapeClass('rounded-full');
+      }, 300);
+    }
+
+    return () => {
+      if (shapeTimeoutRef.current) {
+        clearTimeout(shapeTimeoutRef.current);
+      }
+    };
+  }, [isOpen]);
+
+  const logoElement = (
+    <div className="relative w-5 h-5 flex items-center justify-center">
+    <span className="absolute w-1.5 h-1.5 rounded-full bg-gray-200 top-0 left-1/2 transform -translate-x-1/2 opacity-80"></span>
+    <span className="absolute w-1.5 h-1.5 rounded-full bg-gray-200 left-0 top-1/2 transform -translate-y-1/2 opacity-80"></span>
+    <span className="absolute w-1.5 h-1.5 rounded-full bg-gray-200 right-0 top-1/2 transform -translate-y-1/2 opacity-80"></span>
+    <span className="absolute w-1.5 h-1.5 rounded-full bg-gray-200 bottom-0 left-1/2 transform -translate-x-1/2 opacity-80"></span>
+ </div>
+  );
+
+  const navLinksData = [
+    { label: 'Manifesto', href: '#1' },
+    { label: 'Careers', href: '#2' },
+    { label: 'Discover', href: '#3' },
+  ];
+
+  const loginButtonElement = (
+    <button className="px-4 py-2 sm:px-3 text-xs sm:text-sm border border-[#333] bg-[rgba(31,31,31,0.62)] text-gray-300 rounded-full hover:border-white/50 hover:text-white transition-colors duration-200 w-full sm:w-auto">
+      LogIn
+    </button>
+  );
+
+  const signupButtonElement = (
+    <div className="relative group w-full sm:w-auto">
+       <div className="absolute inset-0 -m-2 rounded-full
+                     hidden sm:block
+                     bg-gray-100
+                     opacity-40 filter blur-lg pointer-events-none
+                     transition-all duration-300 ease-out
+                     group-hover:opacity-60 group-hover:blur-xl group-hover:-m-3"></div>
+       <button className="relative z-10 px-4 py-2 sm:px-3 text-xs sm:text-sm font-semibold text-black bg-gradient-to-br from-gray-100 to-gray-300 rounded-full hover:from-gray-200 hover:to-gray-400 transition-all duration-200 w-full sm:w-auto">
+         Signup
+       </button>
+    </div>
+  );
+
+  return (
+    <header className={`fixed top-6 left-1/2 transform -translate-x-1/2 z-20
+                       flex flex-col items-center
+                       pl-6 pr-6 py-3 backdrop-blur-sm
+                       ${headerShapeClass}
+                       border border-[#333] bg-[#1f1f1f57]
+                       w-[calc(100%-2rem)] sm:w-auto
+                       transition-[border-radius] duration-0 ease-in-out`}>
+
+      <div className="flex items-center justify-between w-full gap-x-6 sm:gap-x-8">
+        <div className="flex items-center">
+           {logoElement}
+        </div>
+
+        <nav className="hidden sm:flex items-center space-x-4 sm:space-x-6 text-sm">
+          {navLinksData.map((link) => (
+            <AnimatedNavLink key={link.href} href={link.href}>
+              {link.label}
+            </AnimatedNavLink>
+          ))}
+        </nav>
+
+        <div className="hidden sm:flex items-center gap-2 sm:gap-3">
+          {loginButtonElement}
+          {signupButtonElement}
+        </div>
+
+        <button className="sm:hidden flex items-center justify-center w-8 h-8 text-gray-300 focus:outline-none" onClick={toggleMenu} aria-label={isOpen ? 'Close Menu' : 'Open Menu'}>
+          {isOpen ? (
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          ) : (
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+          )}
+        </button>
+      </div>
+
+      <div className={`sm:hidden flex flex-col items-center w-full transition-all ease-in-out duration-300 overflow-hidden
+                       ${isOpen ? 'max-h-[1000px] opacity-100 pt-4' : 'max-h-0 opacity-0 pt-0 pointer-events-none'}`}>
+        <nav className="flex flex-col items-center space-y-4 text-base w-full">
+          {navLinksData.map((link) => (
+            <a key={link.href} href={link.href} className="text-gray-300 hover:text-white transition-colors w-full text-center">
+              {link.label}
+            </a>
+          ))}
+        </nav>
+        <div className="flex flex-col items-center space-y-4 mt-4 w-full">
+          {loginButtonElement}
+          {signupButtonElement}
+        </div>
+      </div>
+    </header>
+  );
+}
+
+BOT CHANGES + ADD
+balita ko pwede mag sticker yung bot ah i dagdag mo nga lahat ng sticker na meron ang isang account sa config tas mamimili ron yung user kung pwede niya i loop yon, at isa pa pala pwede pala mag type indicator yung ws3-fca ah lagyan mo typing indicator sa config yung gumagana ah at gawin mong pwede ka rin makapag on ng loop sa comment section ng post pag nag type ka ng dot yung mga naka store na msg lang din sa loop sa gc yung masesend sa comment okay para iisa na lang di pa lagay lagay tas gusto ko lagyan mo rin mass add pero mabagal like 1 sec one 1 add sa friend suggestion niya at gusto ko mag send ka pa sakin lahat ng pwede ko pa i add na capable ang bot ko yung mga hindi ko pa natutuklasan na api or features ng ws3 para ma add ko sa bot ko at mag send ka ng ask para sabihin ko ron kung ano ang mga gusto ko pa i add nad rekta push mo na btw yung bg na sinend ko yon din gawin mong background sa intro ah at dashhboard btw akin din yung repo na sinend ko kaya don mo rin i push
