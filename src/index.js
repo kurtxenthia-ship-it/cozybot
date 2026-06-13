@@ -17,6 +17,17 @@ dashboard.state.developerID = DEVELOPER_ID;
 auth.init();
 dashboard.startDashboard(process.env.PORT || 5000);
 
+// Keep Render free-tier alive — ping self every 10 minutes
+if (process.env.RENDER_EXTERNAL_URL) {
+    const http = require("http");
+    const https = require("https");
+    setInterval(() => {
+        const url = process.env.RENDER_EXTERNAL_URL;
+        const mod = url.startsWith("https") ? https : http;
+        try { mod.get(url + "/api/status", () => {}).on("error", () => {}); } catch(_) {}
+    }, 10 * 60 * 1000);
+}
+
 // Map userId -> worker array
 const userWorkers   = new Map();
 const userKillFlags = new Map();
