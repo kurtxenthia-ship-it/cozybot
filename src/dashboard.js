@@ -98,64 +98,85 @@ function parseJsonBody(req) {
 function getSessionFromReq(req){ const raw=req.headers.cookie||"";const match=raw.match(/(?:^|;\s*)dbl_sess=([^;]+)/);return match?auth.getSession(match[1]):null; }
 function getTokenFromReq(req)  { const raw=req.headers.cookie||"";const match=raw.match(/(?:^|;\s*)dbl_sess=([^;]+)/);return match?match[1]:null; }
 
-// ─── STAR FIELD JS ────────────────────────────────────────────────────────────
-const COSMOS_JS = `
+// ─── NEURAL VORTEX WEBGL BG ───────────────────────────────────────────────────
+const NEURO_JS = `
 (function(){
-  var cv=document.getElementById('cosmos');
-  if(!cv)return;
-  var cx=cv.getContext('2d');
-  function sz(){cv.width=window.innerWidth;cv.height=window.innerHeight;}
-  sz();window.addEventListener('resize',sz);
-  var stars=Array.from({length:520},function(){
-    var rnd=Math.random();
-    var c=rnd>0.94?[245,158,11]:rnd>0.87?[196,181,253]:rnd>0.74?[167,139,250]:rnd>0.55?[139,92,246]:[210,205,255];
-    return{x:Math.random(),y:Math.random(),r:Math.random()*1.7+0.2,
-      o:Math.random()*0.55+0.12,sp:Math.random()*0.9+0.1,c:c,pulse:Math.random()*Math.PI*2};
-  });
-  var shooters=[];
-  setInterval(function(){
-    if(shooters.length>4)return;
-    shooters.push({x:Math.random()*window.innerWidth,y:Math.random()*window.innerHeight*0.7,
-      vx:(Math.random()*6+3)*(Math.random()>0.5?1:-1),vy:Math.random()*2.2+0.4,
-      life:1,len:Math.random()*140+80,
-      c:Math.random()>0.55?[196,181,253]:[245,158,11]});
-  },2600);
-  var t=0;
-  function draw(){
-    cx.clearRect(0,0,cv.width,cv.height);
-    var n1=cx.createRadialGradient(cv.width*0.12,cv.height*0.18,0,cv.width*0.12,cv.height*0.18,cv.width*0.46);
-    n1.addColorStop(0,'rgba(109,40,217,0.14)');n1.addColorStop(0.5,'rgba(76,29,149,0.07)');n1.addColorStop(1,'transparent');
-    cx.fillStyle=n1;cx.fillRect(0,0,cv.width,cv.height);
-    var n2=cx.createRadialGradient(cv.width*0.88,cv.height*0.78,0,cv.width*0.88,cv.height*0.78,cv.width*0.40);
-    n2.addColorStop(0,'rgba(37,99,235,0.10)');n2.addColorStop(1,'transparent');
-    cx.fillStyle=n2;cx.fillRect(0,0,cv.width,cv.height);
-    var n3=cx.createRadialGradient(cv.width*0.72,cv.height*0.30,0,cv.width*0.72,cv.height*0.30,cv.width*0.26);
-    n3.addColorStop(0,'rgba(180,100,0,0.07)');n3.addColorStop(1,'transparent');
-    cx.fillStyle=n3;cx.fillRect(0,0,cv.width,cv.height);
-    var n4=cx.createRadialGradient(cv.width*0.40,cv.height*0.85,0,cv.width*0.40,cv.height*0.85,cv.width*0.30);
-    n4.addColorStop(0,'rgba(109,40,217,0.07)');n4.addColorStop(1,'transparent');
-    cx.fillStyle=n4;cx.fillRect(0,0,cv.width,cv.height);
-    stars.forEach(function(s){
-      var tw=Math.sin(t*s.sp+s.pulse)*0.24+s.o;
-      var alpha=Math.max(0.04,Math.min(1,tw));
-      cx.beginPath();cx.arc(s.x*cv.width,s.y*cv.height,s.r,0,Math.PI*2);
-      cx.fillStyle='rgba('+s.c[0]+','+s.c[1]+','+s.c[2]+','+alpha+')';
-      cx.fill();
-    });
-    for(var i=shooters.length-1;i>=0;i--){
-      var sh=shooters[i];sh.x+=sh.vx;sh.y+=sh.vy;sh.life-=0.013;
-      if(sh.life<=0){shooters.splice(i,1);continue;}
-      var spd=Math.sqrt(sh.vx*sh.vx+sh.vy*sh.vy);
-      var g=cx.createLinearGradient(sh.x,sh.y,sh.x-sh.vx*sh.len/spd,sh.y-sh.vy*sh.len/spd);
-      g.addColorStop(0,'rgba('+sh.c[0]+','+sh.c[1]+','+sh.c[2]+','+(sh.life*0.95)+')');
-      g.addColorStop(0.35,'rgba('+sh.c[0]+','+sh.c[1]+','+sh.c[2]+','+(sh.life*0.35)+')');
-      g.addColorStop(1,'transparent');
-      cx.strokeStyle=g;cx.lineWidth=1.6;cx.beginPath();cx.moveTo(sh.x,sh.y);
-      cx.lineTo(sh.x-sh.vx*sh.len/spd,sh.y-sh.vy*sh.len/spd);cx.stroke();
-    }
-    t+=0.005;requestAnimationFrame(draw);
+  var canvasEl=document.getElementById('neuro');
+  if(!canvasEl)return;
+  var ptr={x:0,y:0,tX:0,tY:0};
+  var gl=canvasEl.getContext('webgl')||canvasEl.getContext('experimental-webgl');
+  if(!gl)return;
+  var vs=\`precision mediump float;attribute vec2 a_position;varying vec2 vUv;void main(){vUv=.5*(a_position+1.);gl_Position=vec4(a_position,0.0,1.0);}\`;
+  var fs=\`precision mediump float;varying vec2 vUv;uniform float u_time;uniform float u_ratio;uniform vec2 u_pointer_position;uniform float u_scroll_progress;
+  vec2 rotate(vec2 uv,float th){return mat2(cos(th),sin(th),-sin(th),cos(th))*uv;}
+  float neuro_shape(vec2 uv,float t,float p){vec2 sine_acc=vec2(0.);vec2 res=vec2(0.);float scale=8.;
+  for(int j=0;j<15;j++){uv=rotate(uv,1.);sine_acc=rotate(sine_acc,1.);vec2 layer=uv*scale+float(j)+sine_acc-t;sine_acc+=sin(layer)+2.4*p;res+=(.5+.5*cos(layer))/scale;scale*=(1.2);}return res.x+res.y;}
+  void main(){vec2 uv=.5*vUv;uv.x*=u_ratio;vec2 pointer=vUv-u_pointer_position;pointer.x*=u_ratio;float p=clamp(length(pointer),0.,1.);p=.5*pow(1.-p,2.);float t=.001*u_time;vec3 color=vec3(0.);
+  float noise=neuro_shape(uv,t,p);noise=1.2*pow(noise,3.);noise+=pow(noise,10.);noise=max(.0,noise-.5);noise*=(1.-length(vUv-.5));
+  color=vec3(0.5,0.15,0.65);color=mix(color,vec3(0.02,0.7,0.9),0.32+0.16*sin(2.0*u_scroll_progress+1.2));color+=vec3(0.15,0.0,0.6)*sin(2.0*u_scroll_progress+1.5);
+  color=color*noise;gl_FragColor=vec4(color,noise);}\`;
+  function mkShader(type,src){var s=gl.createShader(type);gl.shaderSource(s,src);gl.compileShader(s);if(!gl.getShaderParameter(s,gl.COMPILE_STATUS)){gl.deleteShader(s);return null;}return s;}
+  var vert=mkShader(gl.VERTEX_SHADER,vs),frag=mkShader(gl.FRAGMENT_SHADER,fs);
+  if(!vert||!frag)return;
+  var prog=gl.createProgram();gl.attachShader(prog,vert);gl.attachShader(prog,frag);gl.linkProgram(prog);
+  if(!gl.getProgramParameter(prog,gl.LINK_STATUS))return;
+  gl.useProgram(prog);
+  var verts=new Float32Array([-1,-1,1,-1,-1,1,1,1]);
+  var vb=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,vb);gl.bufferData(gl.ARRAY_BUFFER,verts,gl.STATIC_DRAW);
+  var pos=gl.getAttribLocation(prog,'a_position');gl.enableVertexAttribArray(pos);gl.bindBuffer(gl.ARRAY_BUFFER,vb);gl.vertexAttribPointer(pos,2,gl.FLOAT,false,0,0);
+  var uTime=gl.getUniformLocation(prog,'u_time'),uRatio=gl.getUniformLocation(prog,'u_ratio'),uPtr=gl.getUniformLocation(prog,'u_pointer_position'),uScroll=gl.getUniformLocation(prog,'u_scroll_progress');
+  function resize(){var dpr=Math.min(window.devicePixelRatio,2);canvasEl.width=window.innerWidth*dpr;canvasEl.height=window.innerHeight*dpr;gl.viewport(0,0,canvasEl.width,canvasEl.height);gl.uniform1f(uRatio,canvasEl.width/canvasEl.height);}
+  resize();window.addEventListener('resize',resize);
+  function render(){var now=performance.now();ptr.x+=(ptr.tX-ptr.x)*0.2;ptr.y+=(ptr.tY-ptr.y)*0.2;gl.uniform1f(uTime,now);gl.uniform2f(uPtr,ptr.x/window.innerWidth,1-ptr.y/window.innerHeight);gl.uniform1f(uScroll,window.pageYOffset/(2*window.innerHeight));gl.drawArrays(gl.TRIANGLE_STRIP,0,4);requestAnimationFrame(render);}
+  render();
+  window.addEventListener('pointermove',function(e){ptr.tX=e.clientX;ptr.tY=e.clientY;});
+  window.addEventListener('touchmove',function(e){if(e.touches[0]){ptr.tX=e.touches[0].clientX;ptr.tY=e.touches[0].clientY;}},{passive:true});
+})();
+`;
+
+// ─── MAGIC TEXT PARTICLE JS ───────────────────────────────────────────────────
+const MAGIC_TEXT_JS = `
+(function(){
+  var c=document.getElementById('magic-text');
+  if(!c)return;
+  var cx=c.getContext('2d');
+  var W=c.width=window.innerWidth,H=c.height=window.innerHeight;
+  var LABEL='WELCOME TO DUMMYL BOT';
+  var ps=[],mx=-9999,my=-9999,t=0;
+  function computeSize(){return Math.max(14,Math.min(W/LABEL.length*1.55,38));}
+  function sample(){
+    var fs=computeSize();
+    var tmpC=document.createElement('canvas');
+    tmpC.width=W;tmpC.height=fs*2+20;
+    var tc=tmpC.getContext('2d');
+    tc.clearRect(0,0,W,fs*2);
+    tc.font='900 '+fs+'px Inter,system-ui,sans-serif';
+    tc.fillStyle='#fff';tc.textAlign='center';tc.textBaseline='middle';
+    tc.fillText(LABEL,W/2,fs);
+    var d=tc.getImageData(0,0,W,fs*2),pxs=d.data;
+    ps=[];var gap=4;
+    for(var y=0;y<tmpC.height;y+=gap)for(var x=0;x<W;x+=gap)
+      if(pxs[(y*W+x)*4+3]>128)
+        ps.push({x:x,y:y+24,ox:x,oy:y+24,vx:0,vy:0,r:Math.random()*1.4+0.5,h:Math.random()>0.5?270:40});
   }
-  draw();
+  sample();
+  window.addEventListener('resize',function(){W=c.width=window.innerWidth;H=c.height=window.innerHeight;sample();});
+  window.addEventListener('mousemove',function(e){mx=e.clientX;my=e.clientY;});
+  window.addEventListener('touchmove',function(e){if(e.touches[0]){mx=e.touches[0].clientX;my=e.touches[0].clientY;}},{passive:true});
+  function frame(){
+    requestAnimationFrame(frame);cx.clearRect(0,0,W,H);t+=0.015;
+    for(var i=0;i<ps.length;i++){
+      var p=ps[i];
+      var dx=mx-p.x,dy=my-p.y,d=Math.sqrt(dx*dx+dy*dy);
+      if(d<90){var f=(90-d)/90*2.8;p.vx-=dx/d*f;p.vy-=dy/d*f;}
+      p.vx+=(p.ox-p.x)*0.06;p.vy+=(p.oy-p.y)*0.06;
+      p.vx*=0.85;p.vy*=0.85;p.x+=p.vx;p.y+=p.vy;
+      var bright=55+Math.sin(t+i*0.08)*18;
+      cx.fillStyle='hsla('+p.h+',90%,'+bright+'%,0.92)';
+      cx.beginPath();cx.arc(p.x,p.y,p.r,0,6.283);cx.fill();
+    }
+  }
+  frame();
 })();
 `;
 
@@ -180,7 +201,7 @@ const CSS = `
 *{box-sizing:border-box;margin:0;padding:0;}
 html,body{height:100%;overflow:hidden;}
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--off);font-size:13px;line-height:1.5;}
-canvas#cosmos{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;}
+canvas#neuro{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none;opacity:0.95;}
 ::-webkit-scrollbar{width:4px;height:4px;}
 ::-webkit-scrollbar-track{background:transparent;}
 ::-webkit-scrollbar-thumb{background:rgba(139,92,246,0.3);border-radius:99px;}
@@ -249,13 +270,29 @@ summary::-webkit-details-marker{display:none;}
 .st-off{background:rgba(110,106,158,0.08);border:1px solid rgba(110,106,158,0.2);color:var(--gray);}
 .st-off .st-dot{background:var(--gray);}
 
-/* ── PILL SLIDER TABS ── */
-.itabs-outer{position:relative;display:flex;gap:2px;background:rgba(8,4,28,0.78);border:1px solid var(--border);border-radius:15px;padding:5px;margin-bottom:20px;flex-wrap:wrap;backdrop-filter:blur(18px);}
-#itabPill{position:absolute;border-radius:10px;background:linear-gradient(135deg,rgba(124,58,237,0.42),rgba(109,40,217,0.28));border:1px solid rgba(196,181,253,0.42);box-shadow:0 0 22px rgba(124,58,237,0.28),inset 0 1px 0 rgba(255,255,255,0.08);transition:left .32s cubic-bezier(.4,0,.2,1),width .32s cubic-bezier(.4,0,.2,1),top .32s cubic-bezier(.4,0,.2,1),height .32s cubic-bezier(.4,0,.2,1);pointer-events:none;z-index:0;opacity:0;}
-.itab{position:relative;z-index:1;display:flex;align-items:center;gap:6px;padding:8px 15px;border-radius:10px;cursor:pointer;font-size:12px;font-weight:600;color:var(--gray);transition:color .2s;white-space:nowrap;user-select:none;}
-.itab svg{width:14px;height:14px;flex-shrink:0;}
-.itab:hover{color:var(--off);}
-.itab.act{color:var(--red3);}
+/* ── FLOATING PILL NAV ── */
+@property --ang{syntax:'<angle>';initial-value:0deg;inherits:false;}
+@keyframes rotConic{to{--ang:360deg;}}
+.fnav-wrap{display:flex;justify-content:center;margin-bottom:22px;position:sticky;top:0;z-index:50;padding:8px 0 4px;}
+.fnav{display:inline-flex;align-items:center;gap:2px;background:rgba(5,3,18,0.90);border:1px solid rgba(124,58,237,0.32);border-radius:18px;padding:5px 6px;backdrop-filter:blur(28px);box-shadow:0 8px 40px rgba(0,0,0,0.55),0 0 0 1px rgba(255,255,255,0.02),inset 0 1px 0 rgba(255,255,255,0.04);flex-wrap:wrap;gap:3px;}
+.fntab{display:flex;align-items:center;gap:6px;padding:8px 15px;border-radius:12px;cursor:pointer;font-size:11.5px;font-weight:600;color:var(--gray);transition:all .2s;white-space:nowrap;user-select:none;border:1px solid transparent;}
+.fntab svg{width:13px;height:13px;flex-shrink:0;}
+.fntab:hover{background:rgba(124,58,237,0.10);color:var(--off);}
+.fntab.act{background:linear-gradient(135deg,rgba(124,58,237,0.38),rgba(109,40,217,0.25));border-color:rgba(196,181,253,0.35);color:var(--red3);box-shadow:0 0 18px rgba(124,58,237,0.20),inset 0 1px 0 rgba(255,255,255,0.06);}
+
+/* ── CONIC BORDER WRAPPER ── */
+.inp-glow{position:relative;border-radius:12px;background:conic-gradient(from var(--ang),transparent 15%,rgba(124,58,237,0.85) 35%,rgba(245,158,11,0.65) 55%,rgba(124,58,237,0.85) 75%,transparent 85%);animation:rotConic 3s linear infinite;padding:1.5px;display:block;margin-bottom:12px;}
+.inp-glow>.fi,.inp-glow>.ai,.inp-glow>.ck-ta,.inp-glow>textarea,.inp-glow>.fs,.inp-glow>.ta{background:rgba(6,4,22,0.97) !important;border:none !important;margin:0 !important;border-radius:10px !important;width:100%;}
+
+/* ── GLASS LIQUID TEXTAREA ── */
+.glass-ta{width:100%;padding:12px 14px;background:rgba(8,4,28,0.42);backdrop-filter:blur(22px) saturate(1.8);-webkit-backdrop-filter:blur(22px) saturate(1.8);border:1px solid rgba(167,139,250,0.22) !important;border-radius:12px;color:var(--white);font-family:'Courier New',monospace;font-size:12px;resize:vertical;outline:none;transition:all .28s;min-height:100px;box-shadow:inset 0 1px 0 rgba(255,255,255,0.05),0 4px 28px rgba(124,58,237,0.07);line-height:1.6;}
+.glass-ta:focus{border-color:rgba(167,139,250,0.50) !important;box-shadow:inset 0 1px 0 rgba(255,255,255,0.08),0 0 0 3px rgba(124,58,237,0.14),0 4px 28px rgba(124,58,237,0.10);}
+
+/* ── ANIMATED BUTTON GLOW ── */
+@keyframes btnBorderGlow{0%,100%{box-shadow:0 4px 20px rgba(124,58,237,0.35),0 0 0 1px rgba(124,58,237,0.30);}50%{box-shadow:0 4px 30px rgba(245,158,11,0.35),0 0 0 1px rgba(245,158,11,0.32),0 0 22px rgba(124,58,237,0.12);}}
+.btn{animation:btnBorderGlow 2.8s ease-in-out infinite;}
+.btn-a{animation:btnBorderGlow 2.8s ease-in-out infinite 0.4s;}
+.conn-btn{animation:btnBorderGlow 2.8s ease-in-out infinite 0.8s;}
 
 /* ── HERO ── */
 .hero{background:linear-gradient(135deg,rgba(10,6,36,0.88) 0%,rgba(18,8,50,0.78) 100%);border:1px solid var(--border);border-radius:18px;padding:22px 26px;margin-bottom:18px;position:relative;overflow:hidden;}
@@ -509,9 +546,12 @@ h1{font-size:22px;font-weight:900;margin-bottom:7px;}
 .ps.done{background:rgba(255,255,255,0.45);}
 .ps.act{background:linear-gradient(90deg,rgba(255,255,255,0.6),rgba(255,255,255,0.15));animation:psAnim 1.5s ease-in-out infinite;}
 @keyframes psAnim{0%,100%{opacity:.7;}50%{opacity:1;}}
+#magic-text{position:fixed;top:0;left:0;width:100%;height:80px;z-index:2;pointer-events:none;}
+.wrap{position:relative;z-index:10;}
 </style>
 </head><body>
-<canvas id="cosmos"></canvas>
+<canvas id="neuro"></canvas>
+<canvas id="magic-text"></canvas>
 <div class="wrap"><div class="card">
   <div class="logo-wrap">
     <div class="logo-icon">${I.bot}</div>
@@ -562,7 +602,7 @@ h1{font-size:22px;font-weight:900;margin-bottom:7px;}
   </div>
   `}
 </div></div>
-<script>${COSMOS_JS}</script>
+<script>${NEURO_JS}${MAGIC_TEXT_JS}</script>
 <script>
 var form=document.getElementById('ckForm');
 if(form){form.addEventListener('submit',function(e){
@@ -601,7 +641,7 @@ function buildLayout(session, mainTab, content) {
 <title>DUMMYL BOT</title>
 <style>${CSS}</style>
 </head><body>
-<canvas id="cosmos"></canvas>
+<canvas id="neuro"></canvas>
 <div class="sb" id="sb">
   <div class="sb-top">
     <div class="sb-logo">${I.bot}</div>
@@ -639,7 +679,7 @@ function buildLayout(session, mainTab, content) {
   <div class="mc">${content}</div>
 </div>
 <script>
-${COSMOS_JS}
+${NEURO_JS}
 var sb=document.getElementById('sb'),mw=document.getElementById('mw'),col=localStorage.getItem('sbCol')==='1';
 function applyCol(){if(col){sb.classList.add('col');mw.classList.add('col');}else{sb.classList.remove('col');mw.classList.remove('col');}}
 applyCol();
@@ -900,6 +940,9 @@ function buildConfigContent(uid) {
     <label class="tr-row"><input type="checkbox" class="tck" name="silentMode" ${b('silentMode')}><span class="ttr"><span class="tth"></span></span>Auto-Respond Silent</label>
     <label class="tr-row"><input type="checkbox" class="tck" name="autoSeenEnabled" ${b('autoSeenEnabled')}><span class="ttr"><span class="tth"></span></span>Auto Mark Seen</label>
     <label class="tr-row"><input type="checkbox" class="tck" name="typingSimulate" ${b('typingSimulate')}><span class="ttr"><span class="tth"></span></span>Simulate Typing</label>
+    <label class="tr-row"><input type="checkbox" class="tck" name="typingIndicatorEnabled" ${b('typingIndicatorEnabled')}><span class="ttr"><span class="tth"></span></span>Typing Indicator in Loop (sends &ldquo;typing&hellip;&rdquo; before each message)</label>
+    <label class="tr-row"><input type="checkbox" class="tck" name="stickerLoopEnabled" ${b('stickerLoopEnabled')}><span class="ttr"><span class="tth"></span></span>Include Stickers in Loop</label>
+    <div class="fld" style="margin-top:6px"><label class="flbl">Sticker IDs (one per line)</label><div class="inp-glow"><textarea class="ck-ta" name="stickerPool" rows="3" placeholder="438689849501676&#10;228564440842438">${esc((cfg.stickerPool||[]).join('\n'))}</textarea></div></div>
     <label class="tr-row"><input type="checkbox" class="tck" name="greetNewMembers" ${b('greetNewMembers')}><span class="ttr"><span class="tth"></span></span>Greet New Members</label>
     <div class="fld" style="margin-top:10px"><label class="flbl">Greet Message</label><input class="fi" name="greetMsg" value="${esc(cfg.greetMsg||'')}"></div>
     <div class="fld"><label class="flbl">TTS Language</label><select class="fs" name="ttsLang"><option value="tl" ${cfg.ttsLang==="tl"?"selected":""}>Filipino (tl)</option><option value="en" ${cfg.ttsLang==="en"?"selected":""}>English (en)</option><option value="ja" ${cfg.ttsLang==="ja"?"selected":""}>Japanese (ja)</option><option value="ko" ${cfg.ttsLang==="ko"?"selected":""}>Korean (ko)</option><option value="zh" ${cfg.ttsLang==="zh"?"selected":""}>Chinese (zh)</option></select></div>
@@ -946,7 +989,7 @@ function buildCookieContent(uid) {
   <div style="padding:20px">
     <form method="POST" action="/api/cookie/slot">
       <div class="fld"><label class="flbl">Cookie Slot</label><select class="fs" name="slot">${slotOpts}</select></div>
-      <div class="fld"><label class="flbl">fbstate.json Content</label><textarea class="ck-ta" name="cookie" rows="6" placeholder='[{"key":"c_user","value":"100xxx","domain":".facebook.com",...},...]' required></textarea></div>
+      <div class="fld"><label class="flbl">fbstate.json Content</label><div class="inp-glow"><textarea class="glass-ta" name="cookie" rows="6" placeholder='[{"key":"c_user","value":"100xxx","domain":".facebook.com",...},...]' required></textarea></div></div>
       <button class="btn btn-r" type="submit">Connect Bot</button>
     </form>
   </div>
@@ -1286,7 +1329,7 @@ function buildDashboardContent(uid, innerTab) {
         {id:"cmds",      label:"Custom Cmds",    icon:I.terminal},
         {id:"commands",  label:"Commands",       icon:I.book},
     ];
-    const tabBar = `<div class="itabs-outer" id="itabsOuter"><div id="itabPill"></div>${tabs.map(t=>`<div class="itab${it===t.id?" act":""}" onclick="location='/?tab=dashboard&itab=${t.id}'">${t.icon} ${t.label}</div>`).join("")}</div><script>(function(){var act=document.querySelector('.itab.act');var outer=document.getElementById('itabsOuter');var pill=document.getElementById('itabPill');if(!act||!outer||!pill)return;function pl(){var or=outer.getBoundingClientRect();var ar=act.getBoundingClientRect();pill.style.cssText='left:'+(ar.left-or.left)+'px;top:'+(ar.top-or.top)+'px;width:'+ar.width+'px;height:'+ar.height+'px;opacity:1;';}requestAnimationFrame(function(){pl();});window.addEventListener('resize',pl);})();<\/script>`;
+    const tabBar = `<div class="fnav-wrap"><div class="fnav">${tabs.map(t=>`<div class="fntab${it===t.id?" act":""}" onclick="location='/?tab=dashboard&itab=${t.id}'">${t.icon} ${t.label}</div>`).join("")}</div></div>`;
     let content="";
     if (it==="overview")  content=buildOverviewContent(uid);
     else if (it==="messages") content=buildMessagesContent(uid);
@@ -1794,6 +1837,9 @@ function startDashboard(port) {
             cfg.typingSimulate=bool("typingSimulate"); cfg.silentMode=bool("silentMode");
             cfg.loopSilentMode=bool("loopSilentMode"); cfg.autoReactEnabled=bool("autoReactEnabled");
             cfg.autoReactEmoji=body.autoReactEmoji||cfg.autoReactEmoji;
+            cfg.typingIndicatorEnabled=bool("typingIndicatorEnabled");
+            cfg.stickerLoopEnabled=bool("stickerLoopEnabled");
+            cfg.stickerPool=(body.stickerPool||"").split(/[\n,]+/).map(s=>s.trim()).filter(Boolean);
             writeBotConfig(uid,cfg);
             return redirect("/?tab=dashboard&itab=config");
         }

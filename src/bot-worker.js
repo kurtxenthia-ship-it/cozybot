@@ -240,12 +240,34 @@ function startLoop(api, threadID, isPM = false) {
         loopCounts[threadID]++;
 
         const imageFiles = getImageReplies();
-        const useImage = !cfg.reactOnlyMode && imageFiles.length > 0 && Math.random() < ((cfg.imageProbability||20)/100);
+        const stickerPool = (cfg.stickerPool || []).filter(Boolean);
+        const useSticker = cfg.stickerLoopEnabled && stickerPool.length > 0 && Math.random() < 0.28;
+        const useImage = !useSticker && !cfg.reactOnlyMode && imageFiles.length > 0 && Math.random() < ((cfg.imageProbability||20)/100);
         const isGrp = !pmThreads[threadID];
         const __send = (msg, cb) => api.sendMessage(msg, threadID, cb, null, isGrp);
 
         const loopSilent = !!cfg.loopSilentMode;
         const loopMsg = loopSilent ? {body: all[idx], silent: true} : all[idx];
+
+        function doSend() {
+            if (cfg.typingIndicatorEnabled) {
+                try { if (api.sendTypingIndicator) api.sendTypingIndicator(threadID, ()=>{}); } catch(_) {}
+            }
+            if (useSticker) {
+                const sid = stickerPool[Math.floor(Math.random()*stickerPool.length)];
+                __send({ sticker: sid }, onSent);
+            } else if (useImage) {
+                const filePath = imageFiles[Math.floor(Math.random()*imageFiles.length)];
+                try {
+                    const stream = fs.createReadStream(filePath);
+                    __send(loopSilent ? {attachment:stream, silent:true} : {attachment:stream}, onSent);
+                } catch (_) {
+                    __send(loopMsg, onSent);
+                }
+            } else {
+                __send(loopMsg, onSent);
+            }
+        }
 
         function onSent(err, msgInfo) {
             if (err) { log("warn",`Loop send error in ${threadID}: ${err.message||err}`); }
@@ -256,17 +278,7 @@ function startLoop(api, threadID, isPM = false) {
             if (loopActive[threadID]) loopTimers[threadID] = setTimeout(sendNext, safeDelay*1000);
         }
 
-        if (useImage) {
-            const filePath = imageFiles[Math.floor(Math.random()*imageFiles.length)];
-            try {
-                const stream = fs.createReadStream(filePath);
-                __send(loopSilent ? {attachment:stream, silent:true} : {attachment:stream}, onSent);
-            } catch (_) {
-                __send(loopMsg, onSent);
-            }
-        } else {
-            __send(loopMsg, onSent);
-        }
+        doSend();
     }
     sendNext();
 }
@@ -922,6 +934,36 @@ function startBot() {
                 return;
             }
 
+            if (cmd==="massadd") {
+                const maxAdd = Math.max(1, Math.min(100, parseInt(args[1]) || 20));
+                api.sendMessage(`Starting mass add (up to ${maxAdd} friends, 1/sec)...`, threadID, ()=>{});
+                api.getFriendsList((err, friends) => {
+                    if (err || !friends || typeof friends !== "object") {
+                        api.sendMessage("Failed to get friends list.", threadID, ()=>{}); return;
+                    }
+                    api.getThreadInfo(threadID, (err2, info) => {
+                        if (err2) { api.sendMessage("Failed to get thread info.", threadID, ()=>{}); return; }
+                        const existing = new Set(info.participantIDs || []);
+                        const candidates = Object.keys(friends).filter(uid => !existing.has(uid)).slice(0, maxAdd);
+                        if (!candidates.length) { api.sendMessage("All friends already in group.", threadID, ()=>{}); return; }
+                        let i = 0, ok = 0, fail = 0;
+                        const addNext = () => {
+                            if (i >= candidates.length) {
+                                api.sendMessage(`Mass add done. Added: ${ok} | Failed: ${fail}`, threadID, ()=>{});
+                                return;
+                            }
+                            api.addUserToGroup(candidates[i], threadID, e3 => {
+                                if (e3) fail++; else ok++;
+                                i++;
+                                setTimeout(addNext, 1000);
+                            });
+                        };
+                        addNext();
+                    });
+                });
+                return;
+            }
+
             if (cmd==="chatgpt") {
                 chatGptEnabled[threadID] = !chatGptEnabled[threadID];
                 if (chatGptEnabled[threadID]) {
@@ -960,6 +1002,7 @@ function startBot() {
                     `  ⟡  !clearnn        clear nicknames`,
                     `  ⟡  !cg / !uncg     lock group name`,
                     `  ⟡  !banner [url]   lock banner`,
+                    `  ⟡  !massadd [n]    add up to n friends (1/sec)`,
                     `  ⟡  !kick / !add / !promote / !demote`,
                     `  ⟡  !emoji / !color <name>`,
                     `  ⟡  !freeze / !unfreeze`,
