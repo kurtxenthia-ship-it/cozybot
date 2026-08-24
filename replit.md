@@ -110,7 +110,7 @@ All endpoints require auth (dbl_sess cookie). Returns HTML or JSON.
 
 ## Tech Stack
 - Node.js (plain JS, no frameworks)
-- ws3-fca — Facebook Messenger API (MQTT-based)
+- fca-unofficial — Facebook Messenger API (MQTT-based)
 - Multi-process: main index.js spawns bot-worker.js per fbstate file
 - bcryptjs — password hashing
 - @distube/ytdl-core — YouTube audio download for `!p` command
