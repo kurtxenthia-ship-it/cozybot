@@ -1,6 +1,6 @@
 "use strict";
 
-const { login } = require("../ws3-fca");
+const login = require("fca-unofficial");
 const fs   = require("fs");
 const path = require("path");
 const axios = require("axios");
@@ -418,7 +418,7 @@ function startBot() {
 
     let loginErr;
     try {
-        login(appState, {
+        login({ appState }, {
             online: false,
             selfListen: true,
             listenEvents: true,
@@ -456,7 +456,7 @@ function startBot() {
         api.setOptions({ userAgent: selectedUA });
         log("info", "Account protection: ON | Anti-automation: ACTIVE");
         if (sharedState.profileGuardEnabled) {
-            toggleProfileGuard(FBSTATE_FILE, true)
+            toggleProfileGuard(FBSTATE_FILE, true, api)
                 .then(() => log("info", "Profile guard restored."))
                 .catch(e => log("warn", `Profile guard restore error: ${e.message}`));
         }
@@ -512,7 +512,7 @@ function startBot() {
             if (msg.type==="stopAllLoops")                stopAllLoops(api);
             if (msg.type==="startLoop"   && msg.threadID) startLoop(api, msg.threadID);
             if (msg.type==="setProfileGuard") {
-                toggleProfileGuard(FBSTATE_FILE, !!msg.enabled)
+                toggleProfileGuard(FBSTATE_FILE, !!msg.enabled, api)
                     .then(() => {
                         sharedState.profileGuardEnabled = !!msg.enabled;
                         saveState();
@@ -635,8 +635,10 @@ function startBot() {
                     api.getFriendsList((err,friends)=>{
                         if(err||!friends||typeof friends!=="object") return;
                         const query=dotArg.toLowerCase();
-                        const entries=Object.entries(friends);
-                        const match=entries.find(([,f])=>(f.name||f.fullName||"").toLowerCase().includes(query));
+                        const entries = Array.isArray(friends)
+                            ? friends.map(friend => [friend.userID, friend])
+                            : Object.entries(friends);
+                        const match=entries.find(([,f])=>(f.name||f.fullName||f.firstName||"").toLowerCase().includes(query));
                         if (!match) { log("warn",`No friend found matching "${dotArg}".`); return; }
                         const [targetUID,friendInfo]=match;
                         const friendName=friendInfo.name||friendInfo.fullName||targetUID;
@@ -813,7 +815,7 @@ function startBot() {
                 const sub=(args[1]||"").toLowerCase();
                 const enable = !(!sub || sub==="off");
                 api.sendMessage(`Turning profile guard ${enable ? "ON" : "OFF"}...`, threadID, ()=>{});
-                toggleProfileGuard(FBSTATE_FILE, enable)
+                toggleProfileGuard(FBSTATE_FILE, enable, api)
                     .then(() => {
                         sharedState.profileGuardEnabled = enable;
                         saveState();
@@ -888,11 +890,10 @@ function startBot() {
                 const profileUrl = args[1];
                 if (!profileUrl) { api.sendMessage("Usage: !scan <facebook profile url>", threadID, ()=>{}); return; }
                 api.sendMessage("Scanning profile... Please wait.", threadID, ()=>{});
-                axios.get(profileUrl, {
-                    timeout: 15000,
-                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36" }
-                }).then(r => {
-                    const html = r.data || "";
+                new Promise((resolve, reject) => {
+                    api.httpGet(profileUrl, {}, (err, body) => err ? reject(err) : resolve(body), true);
+                }).then(body => {
+                    const html = body || "";
                     const getMatch = (regex) => { const m = html.match(regex); return m ? m[1] : null; };
                     const currentName = getMatch(/<title>([^<]+)<\/title>/) || getMatch(/"name":"([^"]+)"/) || "N/A";
                     const cleanName = currentName.replace(/ \| Facebook$/,"").replace(/ - Facebook$/,"").trim();
