@@ -20,6 +20,7 @@ function getUserState(userId) {
             botName:"", loginInProgress:false, logs:[], alerts:[], msgTimestamps:[],
             get loggedIn()    { return this.bots.some(b=>b.loggedIn); },
             get reconnecting(){ return !this.loggedIn&&this.bots.some(b=>b.reconnecting); },
+            get expired()     { return !this.loggedIn&&this.bots.some(b=>b.expired); },
         };
         userStates.set(userId, s);
     }
@@ -713,8 +714,8 @@ if(form){form.addEventListener('submit',function(e){
 function buildLayout(session, mainTab, content) {
     const uid = session.userId;
     const us  = getUserState(uid);
-    const statusClass = us.loggedIn ? "st-on" : us.reconnecting ? "st-warn" : "st-off";
-    const statusLabel = us.loggedIn ? "Online" : us.reconnecting ? "Connecting" : "Offline";
+    const statusClass = us.loggedIn ? "st-on" : us.reconnecting ? "st-warn" : us.expired ? "st-warn" : "st-off";
+    const statusLabel = us.loggedIn ? "Online" : us.reconnecting ? "Connecting" : us.expired ? "Session rejected" : "Offline";
     const displayName = session.username || us.botName || "User";
     const initials = displayName.slice(0,2).toUpperCase();
 
@@ -789,8 +790,8 @@ function toggleSb(){col=!col;localStorage.setItem('sbCol',col?'1':'0');applyCol(
 function buildOverviewContent(uid) {
     const us  = getUserState(uid);
     const acct= getAccountInfo(uid);
-    const statusClass = us.loggedIn?"p-on":us.reconnecting?"p-warn":"p-off";
-    const statusLabel = us.loggedIn?"Online":us.reconnecting?"Connecting":"Offline";
+    const statusClass = us.loggedIn?"p-on":us.reconnecting?"p-warn":us.expired?"p-warn":"p-off";
+    const statusLabel = us.loggedIn?"Online":us.reconnecting?"Connecting":us.expired?"Session rejected":"Offline";
     const loopCount   = Object.values(us.loopEnabled||{}).filter(Boolean).length;
     const autoCount   = Object.values(us.autoRespondEnabled||{}).filter(Boolean).length;
     const cfg = readBotConfig(uid);
