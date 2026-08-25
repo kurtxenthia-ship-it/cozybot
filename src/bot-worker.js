@@ -444,8 +444,11 @@ function startBot() {
                 send("status",{loggedIn:false,reconnecting:false,expired:true});
                 return;
             }
-            if (isExpired && reconnectDelay>=MAX_RECONNECT) {
-                log("error","Session expired. Re-paste your cookie from the Cookie tab.");
+            if (isExpired) {
+                // Retrying cannot repair an invalid session and only leaves
+                // the dashboard stuck in "Connecting".
+                log("error","Facebook rejected the session (expired or invalid appstate). Update the cookie from the Cookie tab.");
+                send("alert",{alertType:"error",message:"Facebook rejected this session. Replace the cookie in the Cookie tab."});
                 send("status",{loggedIn:false,reconnecting:false,expired:true});
                 return;
             }
