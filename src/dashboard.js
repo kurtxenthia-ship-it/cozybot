@@ -556,6 +556,10 @@ details.box[open]>summary{border-bottom:1px solid var(--border);}
  .st-on,.st-warn,.st-off,.pill,.chip,.tag,.sc-ico{background:rgba(255,255,255,.08)!important;border-color:rgba(255,255,255,.2)!important;color:#fff!important}.st-dot,.pill i,.sc-glow{background:#fff!important;box-shadow:0 0 8px #fff}
  .song-player{position:fixed;right:22px;bottom:22px;width:238px;z-index:150;padding:15px;border:1px solid rgba(255,255,255,.22);border-radius:20px;background:linear-gradient(145deg,rgba(255,255,255,.17),rgba(0,0,0,.52));backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 20px 55px rgba(0,0,0,.5);animation:playerIn .7s .15s cubic-bezier(.25,.1,.25,1) both}
  .song-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}.song-disc{width:34px;height:34px;border-radius:12px;background:linear-gradient(135deg,#fff,#222);display:grid;place-items:center;color:#000}.song-kicker{font-size:9px;letter-spacing:.16em;color:#aaa;text-transform:uppercase}.song-title{font-size:11px;color:#fff;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.song-controls{display:flex;align-items:center;gap:8px}.song-btn{width:29px;height:29px;border:1px solid rgba(255,255,255,.25);border-radius:50%;background:rgba(255,255,255,.12);color:#fff;cursor:pointer;display:grid;place-items:center;transition:all .35s cubic-bezier(.25,.1,.25,1)}.song-btn:hover{transform:scale(1.08);background:#fff;color:#000}.song-range{width:100%;accent-color:#fff;cursor:pointer}.song-volume{width:58px;accent-color:#fff}.song-time{display:flex;justify-content:space-between;color:#999;font-size:9px;margin-top:4px}@keyframes playerIn{from{opacity:0;transform:translateY(18px) scale(.96)}to{opacity:1;transform:none}}@media(max-width:700px){.song-player{right:12px;bottom:12px;width:calc(100% - 24px)}}
+ .inp-glow,.ta-wrap{background:linear-gradient(90deg,transparent,rgba(255,255,255,.65),transparent)!important;animation:none}
+ .hero::before,.hero::after{background:radial-gradient(circle,rgba(255,255,255,.12),transparent 70%)!important}
+ [style*="220,38,38"],[style*="245,158,11"],[style*="#ef4444"],[style*="#dc2626"],[style*="#f59e0b"]{color:#fff!important;background-color:rgba(255,255,255,.08)!important;border-color:rgba(255,255,255,.2)!important}
+ .ck-err,.ck-ok,.tm-stat-err,.tm-stat-ok,.tm-stat-warn{color:#fff!important;background:rgba(255,255,255,.08)!important;border-color:rgba(255,255,255,.2)!important}
 `;
 
 // ─── SVG ICONS ────────────────────────────────────────────────────────────────
@@ -640,7 +644,6 @@ h1{font-size:22px;font-weight:900;margin-bottom:7px;}
 .ps.done{background:rgba(255,255,255,0.45);}
 .ps.act{background:linear-gradient(90deg,rgba(255,255,255,0.6),rgba(255,255,255,0.15));animation:psAnim 1.5s ease-in-out infinite;}
 @keyframes psAnim{0%,100%{opacity:.7;}50%{opacity:1;}}
-#magic-text{position:fixed;top:0;left:0;width:100%;height:110px;z-index:2;pointer-events:none;}
 </style><style>${CSS}</style>
 </head><body>
 <canvas id="neuro"></canvas>
