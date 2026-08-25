@@ -401,6 +401,14 @@ function startBot() {
     let appState;
     try { appState = JSON.parse(fs.readFileSync(FBSTATE_FILE,"utf8")); }
     catch(e) { log("error","Cannot read fbstate: "+e.message); send("status",{loggedIn:false,reconnecting:false}); return; }
+    if (!Array.isArray(appState) || !appState.length ||
+        !appState.some(c => c && c.key === "c_user" && c.value) ||
+        !appState.some(c => c && c.key === "xs" && c.value)) {
+        log("error","fbstate is not a usable Facebook appstate array (c_user/xs missing).");
+        send("alert",{alertType:"error",message:"Invalid fbstate format. Export the cookie as a JSON array and replace the file."});
+        send("status",{loggedIn:false,reconnecting:false,expired:true});
+        return;
+    }
 
     const selectedUA = getRandomUA();
     log("info", `Connecting...`);
@@ -414,7 +422,7 @@ function startBot() {
             send("status", { loggedIn: false, reconnecting: false });
             scheduleReconnect();
         }
-    }, 90000);
+    }, 25000);
 
     let loginErr;
     try {
