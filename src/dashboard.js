@@ -98,14 +98,27 @@ function parseJsonBody(req) {
 function getSessionFromReq(req){ const raw=req.headers.cookie||"";const match=raw.match(/(?:^|;\s*)dbl_sess=([^;]+)/);return match?auth.getSession(match[1]):null; }
 function getTokenFromReq(req)  { const raw=req.headers.cookie||"";const match=raw.match(/(?:^|;\s*)dbl_sess=([^;]+)/);return match?match[1]:null; }
 
-// ─── NEURAL VORTEX WEBGL BG ───────────────────────────────────────────────────
+// ─── PROCEDURAL MONOCHROME GALAXY ─────────────────────────────────────────────
 const NEURO_JS = `
 (function(){
   var canvasEl=document.getElementById('neuro');
-  if(!canvasEl)return;
-  var ptr={x:0,y:0,tX:0,tY:0};
-  var gl=canvasEl.getContext('webgl')||canvasEl.getContext('experimental-webgl');
-  if(!gl)return;
+  var ctx=canvasEl&&canvasEl.getContext('2d');
+  if(!ctx)return;
+  var stars=[],w=0,h=0,px=0,py=0;
+  function rand(a,b){return a+Math.random()*(b-a);}
+  function resize(){w=canvasEl.width=innerWidth*devicePixelRatio;h=canvasEl.height=innerHeight*devicePixelRatio;ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);stars=[];for(var i=0;i<650;i++)stars.push({x:rand(-1,1),y:rand(-1,1),z:rand(.12,1),r:rand(.25,1.55),a:rand(.25,.95)});}
+  function render(t){
+    var W=innerWidth,H=innerHeight,ox=W/2+px*.018,oy=H/2+py*.018;
+    ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+    var bg=ctx.createRadialGradient(ox,oy,0,ox,oy,Math.max(W,H)*.78);bg.addColorStop(0,'#171717');bg.addColorStop(.34,'#080808');bg.addColorStop(1,'#000');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+    ctx.save();ctx.translate(ox,oy);ctx.rotate(-.34+Math.sin(t*.000025)*.012);ctx.scale(1.42,.28);
+    var neb=ctx.createRadialGradient(0,0,0,0,0,W*.72);neb.addColorStop(0,'rgba(255,255,255,.16)');neb.addColorStop(.28,'rgba(190,190,190,.07)');neb.addColorStop(1,'rgba(0,0,0,0)');ctx.fillStyle=neb;ctx.fillRect(-W,-H,W*2,H*2);
+    for(var k=0;k<6;k++){ctx.beginPath();ctx.ellipse(0,0,W*(.1+k*.13),H*(.07+k*.03),0,0,Math.PI*2);ctx.strokeStyle='rgba(255,255,255,'+(.025-k*.003)+')';ctx.lineWidth=2;ctx.stroke();}ctx.restore();
+    stars.forEach(function(s){var x=(s.x+s.z*.04*Math.sin(t*.00002))*W*.62+W/2+px*(1-s.z)*.04,y=s.y*H*.58+H/2+py*(1-s.z)*.04;ctx.fillStyle='rgba(255,255,255,'+s.a+')';ctx.beginPath();ctx.arc(x,y,s.r*s.z,0,Math.PI*2);ctx.fill();});
+    requestAnimationFrame(render);
+  }
+  resize();addEventListener('resize',resize);addEventListener('pointermove',function(e){px=e.clientX-innerWidth/2;py=e.clientY-innerHeight/2;});requestAnimationFrame(render);
+  /*
   var vs=\`precision mediump float;attribute vec2 a_position;varying vec2 vUv;void main(){vUv=.5*(a_position+1.);gl_Position=vec4(a_position,0.0,1.0);}\`;
   var fs=\`precision mediump float;varying vec2 vUv;uniform float u_time;uniform float u_ratio;uniform vec2 u_pointer_position;uniform float u_scroll_progress;
   vec2 rotate(vec2 uv,float th){return mat2(cos(th),sin(th),-sin(th),cos(th))*uv;}
@@ -131,6 +144,7 @@ const NEURO_JS = `
   render();
   window.addEventListener('pointermove',function(e){ptr.tX=e.clientX;ptr.tY=e.clientY;});
   window.addEventListener('touchmove',function(e){if(e.touches[0]){ptr.tX=e.touches[0].clientX;ptr.tY=e.touches[0].clientY;}},{passive:true});
+  */
 })();
 `;
 
@@ -524,7 +538,24 @@ details.box[open]>summary{border-bottom:1px solid var(--border);}
 .inbox-from{font-size:12px;font-weight:600;color:var(--off);}
 .inbox-subj{font-size:12.5px;color:var(--white);}
 .inbox-date{font-size:10.5px;color:var(--gray2);}
-.inbox-body{font-size:12px;color:var(--gray);white-space:pre-wrap;padding:14px 18px;background:rgba(220,38,38,0.04);border-top:1px solid var(--border);}
+ .inbox-body{font-size:12px;color:var(--gray);white-space:pre-wrap;padding:14px 18px;background:rgba(220,38,38,0.04);border-top:1px solid var(--border);}
+ /* ── COSMIC LIQUID GLASS OVERHAUL ── */
+ :root{--bg:#000;--sidebar:rgba(0,0,0,.48);--card:rgba(255,255,255,.075);--card2:rgba(0,0,0,.34);--glass:rgba(255,255,255,.08);--glass2:rgba(255,255,255,.14);--border:rgba(255,255,255,.16);--border2:rgba(255,255,255,.34);--gray:#aaa;--gray2:#666;--white:#fff;--off:#eee;--red:#fff;--red2:#fff;--red3:#fff;--gold:#fff;--gold2:#fff;--cosmic:#fff;--ok:#fff;--warn:#fff;--info:#fff;--danger:#fff;}
+ html{scroll-behavior:smooth;scroll-snap-type:y proximity}body{background:#000;color:#eee;font-weight:300}
+ canvas#neuro{background:#000;opacity:1}
+ .sb,.topbar,.box,.sc,.hero,.ck-card,.mail-card,.tm-msg-view,.anav{background:linear-gradient(135deg,rgba(255,255,255,.13),rgba(0,0,0,.38));backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border-color:rgba(255,255,255,.18);box-shadow:inset 0 1px 0 rgba(255,255,255,.18),inset 0 -1px 0 rgba(0,0,0,.35),0 18px 50px rgba(0,0,0,.28)}
+ .sb-logo,.u-av,.hero-ic,.ck-logo-ic{background:linear-gradient(145deg,#fff,#444);box-shadow:0 10px 30px rgba(255,255,255,.15)}
+ .sb-name,.tb-title,.hero-title,.ck-title{background:none;-webkit-text-fill-color:#fff;color:#fff}
+ .ni,.btn,.btn-a,.conn-btn,.btn-o,.btn-danger,.lo-btn,.upload-btn-label,.tm-gen-btn,.tm-copy-btn,.tm-refresh-btn{background:linear-gradient(135deg,rgba(255,255,255,.16),rgba(0,0,0,.3));border-color:rgba(255,255,255,.2);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.16),0 8px 24px rgba(0,0,0,.2);animation:none}
+ .ni.act{background:rgba(255,255,255,.16);border-color:rgba(255,255,255,.35);color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.2)}
+ .fi,.fs,.ai,.glass-ta,.ck-ta,.ta{background:rgba(0,0,0,.28)!important;border-color:rgba(255,255,255,.18)!important;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px)}
+ .btn:hover,.btn-a:hover,.conn-btn:hover,.ni:hover,.sc:hover,.box:hover,.tm-gen-btn:hover{transform:translateY(-3px) scale(1.02);border-color:rgba(255,255,255,.45);box-shadow:inset 0 1px 0 rgba(255,255,255,.24),0 14px 34px rgba(0,0,0,.36)}
+ button:active{transform:scale(.97)!important}
+ .sc,.box,.hero{transition:transform .4s cubic-bezier(.25,.1,.25,1),border-color .4s,box-shadow .4s;animation:elementIn .55s cubic-bezier(.25,.1,.25,1) both}
+ @keyframes elementIn{from{opacity:0;transform:translateY(14px) scale(.98)}to{opacity:1;transform:none}}
+ .st-on,.st-warn,.st-off,.pill,.chip,.tag,.sc-ico{background:rgba(255,255,255,.08)!important;border-color:rgba(255,255,255,.2)!important;color:#fff!important}.st-dot,.pill i,.sc-glow{background:#fff!important;box-shadow:0 0 8px #fff}
+ .song-player{position:fixed;right:22px;bottom:22px;width:238px;z-index:150;padding:15px;border:1px solid rgba(255,255,255,.22);border-radius:20px;background:linear-gradient(145deg,rgba(255,255,255,.17),rgba(0,0,0,.52));backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);box-shadow:inset 0 1px 0 rgba(255,255,255,.25),0 20px 55px rgba(0,0,0,.5);animation:playerIn .7s .15s cubic-bezier(.25,.1,.25,1) both}
+ .song-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}.song-disc{width:34px;height:34px;border-radius:12px;background:linear-gradient(135deg,#fff,#222);display:grid;place-items:center;color:#000}.song-kicker{font-size:9px;letter-spacing:.16em;color:#aaa;text-transform:uppercase}.song-title{font-size:11px;color:#fff;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.song-controls{display:flex;align-items:center;gap:8px}.song-btn{width:29px;height:29px;border:1px solid rgba(255,255,255,.25);border-radius:50%;background:rgba(255,255,255,.12);color:#fff;cursor:pointer;display:grid;place-items:center;transition:all .35s cubic-bezier(.25,.1,.25,1)}.song-btn:hover{transform:scale(1.08);background:#fff;color:#000}.song-range{width:100%;accent-color:#fff;cursor:pointer}.song-volume{width:58px;accent-color:#fff}.song-time{display:flex;justify-content:space-between;color:#999;font-size:9px;margin-top:4px}@keyframes playerIn{from{opacity:0;transform:translateY(18px) scale(.96)}to{opacity:1;transform:none}}@media(max-width:700px){.song-player{right:12px;bottom:12px;width:calc(100% - 24px)}}
 `;
 
 // ─── SVG ICONS ────────────────────────────────────────────────────────────────
@@ -550,6 +581,17 @@ const I = {
     fb:      `<svg width="18" height="18" viewBox="0 0 24 24" fill="#1877f2"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>`,
     refresh: `<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>`,
 };
+
+function buildSongPlayer() {
+    const src = "https://file.garden/aahuG_hIDGRlXD24/Iced%20Coffee%20o%20Mango%20Shake%20-%20Hev%20Abi%20%20(Pitch%20Corrected).mp3";
+    return `<aside class="song-player" aria-label="Music player">
+      <div class="song-head"><div class="song-disc">♪</div><div><div class="song-kicker">Now drifting</div><div class="song-title">Iced Coffee o Mango Shake</div></div></div>
+      <audio id="cosmic-audio" src="${src}" autoplay loop preload="auto"></audio>
+      <div class="song-controls"><button class="song-btn" id="song-toggle" type="button" aria-label="Play or pause">▶</button><input class="song-range song-progress" id="song-progress" type="range" min="0" max="100" value="0" aria-label="Song progress"><input class="song-volume" id="song-volume" type="range" min="0" max="1" step=".01" value=".55" aria-label="Volume"></div>
+      <div class="song-time"><span id="song-current">0:00</span><span id="song-duration">—:——</span></div>
+    </aside>
+    <script>(function(){var a=document.getElementById('cosmic-audio'),b=document.getElementById('song-toggle'),p=document.getElementById('song-progress'),v=document.getElementById('song-volume');if(!a)return;a.volume=.55;function tm(s){s=Math.floor(s||0);return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}function sync(){p.value=a.duration?(a.currentTime/a.duration*100):0;document.getElementById('song-current').textContent=tm(a.currentTime);document.getElementById('song-duration').textContent=tm(a.duration)}function state(){b.textContent=a.paused?'▶':'Ⅱ'}b.onclick=function(){a.paused?a.play():a.pause();state()};p.oninput=function(){if(a.duration)a.currentTime=p.value/100*a.duration};v.oninput=function(){a.volume=v.value};a.ontimeupdate=sync;a.onloadedmetadata=sync;a.onplay=state;a.onpause=state;a.play().catch(function(){b.textContent='▶'});})();</script>`;
+}
 
 // ─── COOKIE ENTRY PAGE ────────────────────────────────────────────────────────
 function buildCookieEntryPage(error="", successName="", step="cookie") {
@@ -599,10 +641,9 @@ h1{font-size:22px;font-weight:900;margin-bottom:7px;}
 .ps.act{background:linear-gradient(90deg,rgba(255,255,255,0.6),rgba(255,255,255,0.15));animation:psAnim 1.5s ease-in-out infinite;}
 @keyframes psAnim{0%,100%{opacity:.7;}50%{opacity:1;}}
 #magic-text{position:fixed;top:0;left:0;width:100%;height:110px;z-index:2;pointer-events:none;}
-</style>
+</style><style>${CSS}</style>
 </head><body>
 <canvas id="neuro"></canvas>
-<canvas id="magic-text"></canvas>
 <div class="wrap"><div class="card">
   <div class="logo-wrap">
     <div class="logo-icon">${I.bot}</div>
@@ -653,7 +694,8 @@ h1{font-size:22px;font-weight:900;margin-bottom:7px;}
   </div>
   `}
 </div></div>
-<script>${NEURO_JS}${MAGIC_TEXT_JS}</script>
+${buildSongPlayer()}
+<script>${NEURO_JS}</script>
 <script>
 var form=document.getElementById('ckForm');
 if(form){form.addEventListener('submit',function(e){
@@ -728,14 +770,14 @@ function buildLayout(session, mainTab, content) {
     </div>
   </div>
   <div class="mc">${content}</div>
-</div>
-<script>
+ </div>
+ ${buildSongPlayer()}
+ <script>
 ${NEURO_JS}
 var sb=document.getElementById('sb'),mw=document.getElementById('mw'),col=localStorage.getItem('sbCol')==='1';
 function applyCol(){if(col){sb.classList.add('col');mw.classList.add('col');}else{sb.classList.remove('col');mw.classList.remove('col');}}
 applyCol();
 function toggleSb(){col=!col;localStorage.setItem('sbCol',col?'1':'0');applyCol();}
-if(!sessionStorage.getItem('_vw')){sessionStorage.setItem('_vw','1');if('speechSynthesis' in window){var _vu=new SpeechSynthesisUtterance('Welcome to Facebook Dummy Bot');_vu.pitch=1.05;_vu.rate=0.88;_vu.volume=0.82;_vu.lang='en-US';setTimeout(function(){window.speechSynthesis.speak(_vu);},1000);}}
 </script>
 </body></html>`;
 }
